@@ -36,6 +36,7 @@ class Candidate:
 class Source:
     name = ""
     env_key = ""
+    bg_hints = False  # add BG_HINTS keyword queries to the background colour query
 
     def available(self) -> bool:
         return not self.env_key or bool(os.environ.get(self.env_key))
@@ -52,6 +53,7 @@ class Wallhaven(Source):
 
     name = "wallhaven"
     env_key = ""  # WALLHAVEN_API_KEY is optional
+    bg_hints = True  # its colour filter matches any presence, not the dominant colour
 
     def token(self, hex_color: str) -> str:
         return snap_wallhaven(hex_color)

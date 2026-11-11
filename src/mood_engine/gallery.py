@@ -94,7 +94,10 @@ def render(run: Run, *, server: bool = False, theme_ids: list[tuple[str, str]] |
         '<p class="empty">No candidates. Check the warnings above, or try other keywords.</p>'
     queries = "".join(
         f'<li><b>{SOURCE_LABEL.get(q["source"], q["source"])}</b>: '
-        f'{", ".join(f"<code>{escape(x)}</code>" for x in q["colors"])}</li>' for q in run.queries)
+        f'{", ".join(f"<code>{escape(x)}</code>" for x in q["colors"])}'
+        + (f' (background also searched with keywords '
+           f'{", ".join(f"<code>{escape(h)}</code>" for h in q["hints"])})' if q.get("hints") else "")
+        + '</li>' for q in run.queries)
     warns = "".join(f"<li>{escape(w)}</li>" for w in dict.fromkeys(run.warnings))
     form = _form(run, theme_ids or [], saved) if server else ""
     json_link = (f'<a href="/api?{escape(urlencode({"theme": saved, "q": run.opts.query}))}">JSON</a>'

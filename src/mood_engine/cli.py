@@ -1,4 +1,6 @@
-"""mood-engine CLI: `search` (terminal / JSON / static HTML), `serve` (gallery), `themes`."""
+"""mood-engine CLI: `search` (terminal / JSON / static HTML), `serve` (gallery), `themes`.
+
+`mood-engine [THEME] [options]` with no subcommand is short for `mood-engine serve`."""
 
 from __future__ import annotations
 
@@ -38,7 +40,9 @@ def cmd_search(a) -> int:
         print(f"wrote {a.html}", file=sys.stderr)
     tty = sys.stdout.isatty()
     print(f"{theme.name} ({theme.variant}) · {len(run.results)} results · "
-          + "; ".join(f"{q['source']}: {','.join(q['colors'])}" for q in run.queries))
+          + "; ".join(f"{q['source']}: {','.join(q['colors'])}"
+                      + (f" (+ bg keywords: {', '.join(q['hints'])})" if q.get("hints") else "")
+                      for q in run.queries))
     for i, r in enumerate(run.results, 1):
         s, c = r.score, r.cand
         sw = "".join(_swatch(cl.hex) for cl in r.clusters[:6]) if tty else ""
@@ -67,13 +71,27 @@ def cmd_themes(a) -> int:
     return 0
 
 
+COMMANDS = ("search", "serve", "themes")
+
+
+def with_default_command(argv: list[str]) -> list[str]:
+    """`mood-engine firebox -q x` -> `mood-engine serve firebox -q x`."""
+    if argv and (argv[0] in COMMANDS or argv[0] in ("-h", "--help")):
+        return argv
+    return ["serve", *argv]
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="mood-engine", description=__doc__)
+    argv = with_default_command(sys.argv[1:] if argv is None else list(argv))
+    p = argparse.ArgumentParser(prog="mood-engine", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp):
-        sp.add_argument("-t", "--theme", default="system",
-                        help="theme id from ~/.config/themes, or 'system' (default: OS appearance)")
+        sp.add_argument("theme_pos", nargs="?", metavar="THEME",
+                        help="theme id from ~/.config/themes, or 'system' (the default: "
+                             "the active theme for the OS appearance)")
+        sp.add_argument("-t", "--theme", default="system", help="same as THEME")
         sp.add_argument("-q", "--query", default="", help="optional keywords, e.g. 'mountains'")
         sp.add_argument("--sources", default=",".join(ALL_SOURCES),
                         help="comma list of wallhaven,unsplash,pexels (keyless ones are skipped)")
@@ -99,4 +117,6 @@ def main(argv: list[str] | None = None) -> int:
     t.set_defaults(func=cmd_themes)
 
     a = p.parse_args(argv)
+    if getattr(a, "theme_pos", None):
+        a.theme = a.theme_pos
     return a.func(a)

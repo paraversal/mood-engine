@@ -29,6 +29,12 @@ def image_to_lab(img: Image.Image, max_side: int = 96) -> np.ndarray:
     return srgb_to_oklab(rgb)
 
 
+def image_signature(img: Image.Image, size: tuple[int, int] = (16, 9)) -> np.ndarray:
+    """A tiny OKLab grid of the image (aspect ignored) for spotting re-uploads."""
+    small = img.convert("RGB").resize(size, Image.Resampling.BOX)
+    return srgb_to_oklab(np.asarray(small, dtype=float) / 255.0)
+
+
 def load_image(data: bytes) -> Image.Image:
     return Image.open(io.BytesIO(data))
 

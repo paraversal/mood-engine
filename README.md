@@ -18,8 +18,9 @@ git clone https://github.com/paraversal/mood-engine.git
 cd mood-engine
 uv sync
 uv run mood-engine themes                 # list themes; * = what "system" resolves to
-uv run mood-engine serve                  # gallery at http://127.0.0.1:8765/
-uv run mood-engine search -t firebox      # ranked list in the terminal
+uv run mood-engine                        # gallery for the active theme, http://127.0.0.1:8765/
+uv run mood-engine firebox                # gallery for a given theme
+uv run mood-engine search firebox         # ranked list in the terminal
 ```
 
 `uv tool install -e .` puts `mood-engine` on your PATH.
@@ -74,13 +75,15 @@ Other environment variables:
 ## Usage
 
 ```
-mood-engine search|serve [-t THEME] [-q KEYWORDS] [--sources wallhaven,unsplash,pexels]
+mood-engine [THEME] [options]           same as `mood-engine serve [THEME] [options]`
+mood-engine search|serve [THEME] [-q KEYWORDS] [--sources wallhaven,unsplash,pexels]
                        [--min-res 1920x1080] [--colors 4] [--pages 1] [-k 8] [-n 40]
 mood-engine search ... [--json] [--html out/gallery.html]
 mood-engine serve  ... [--port 8765] [--no-open]
+mood-engine themes
 ```
 
-- `-t/--theme` takes a theme id, or `system` (the default). `system` resolves through
+- `THEME` (or `-t/--theme`) is a theme id, or `system` (the default). `system` resolves through
   `current.json` and then `defaults.json` for the current macOS appearance, then falls
   back to the first theme. If the index is missing, an embedded Gruvbox theme is used.
 - `-q` adds keywords such as `mountains`, `abstract` or `minimal`. Keywords help a lot,
@@ -105,6 +108,14 @@ to them.
    - Pexels: the hex value is passed through unchanged.
 
    The background query fetches 3× as many pages, because it decides most of the score.
+
+   Wallhaven's colour filter only means "this colour appears somewhere", and its
+   toplist is mostly dark: `colors=ffffff` returned 2 light images out of 24. So for
+   **light themes**, when you give no keywords, the Wallhaven background query also
+   runs with the keywords `white background` and `minimalism` (20/24 and 12/24
+   light in the same test). Dark themes don't need this. The gallery and terminal
+   output list these keywords next to the colour filters. The list is
+   `pipeline.BG_HINTS`.
 3. **Palette extraction.** Each thumbnail is downsampled to 96 px and converted to
    OKLab, then clustered with k-means (k = 8, k-means++ seeding, deterministic). Each
    cluster's weight is its share of the image area.
@@ -127,6 +138,10 @@ to them.
      typical case.
 
    All the constants are in `score.Weights`.
+
+   Re-uploads of the same image at another resolution are dropped, keeping the
+   better-ranked copy. Two images count as the same when every cell of their 16×9
+   OKLab grids is within 0.05.
 5. **Gallery.** The gallery is styled with the theme's roles as `--theme-*` CSS
    variables. Each card shows the score, a breakdown, the extracted palette strip, the
    resolution, the colour filter that found the image, attribution and links.
@@ -173,6 +188,8 @@ cover:
 - tint sensitivity
 - off-hue penalty versus in-scheme hues
 - vocabulary snapping
+- query planning (light-theme background keywords; none for dark themes or when you
+  give keywords), duplicate removal, and the `mood-engine THEME` shortcut
 - the reader protocol, including `current.json` precedence and the embedded fallback
 - Unsplash and Pexels parsing with mocked responses, and attribution
 - recolouring raising the score
@@ -182,6 +199,8 @@ cover:
 - Results depend on what the APIs return for a colour filter. Wallhaven's filter only
   requires the colour to appear somewhere in the image, so the ranking does the real
   work. Use `--pages` to widen the pool.
+- Duplicate detection only catches rescaled copies. A re-crop of the same art (one
+  pair in the Solarized Light pool) shifts every cell and shows up twice.
 - Thumbnails are about 200–300 px wide, which is fine for palettes but not for fine
   detail.
 - An earth mover's distance between the image and scheme palettes would reward
