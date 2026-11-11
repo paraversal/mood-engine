@@ -1,0 +1,20 @@
+[project]
+name = "mood-engine"
+version = "0.1.0"
+description = "Suggest existing wallpapers that match a Base24 theme from ~/.config/themes"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "pillow>=10"]
+
+[project.scripts]
+mood-engine = "mood_engine.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
