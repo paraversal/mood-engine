@@ -21,6 +21,8 @@ uv run mood-engine themes                 # list themes; * = what "system" resol
 uv run mood-engine                        # gallery for the active theme, http://127.0.0.1:8765/
 uv run mood-engine firebox                # gallery for a given theme
 uv run mood-engine search firebox         # ranked list in the terminal
+uv run mood-engine apply                  # set a saved wallpaper for the active theme
+uv run mood-engine use firebox            # switch the global theme, then its wallpaper
 ```
 
 `uv tool install -e .` puts `mood-engine` on your PATH.
@@ -80,6 +82,9 @@ mood-engine search|serve [THEME] [-q KEYWORDS] [--sources wallhaven,unsplash,pex
                        [--min-res 1920x1080] [--colors 4] [--pages 1] [-k 8] [-n 40]
 mood-engine search ... [--json] [--html out/gallery.html]
 mood-engine serve  ... [--port 8765] [--no-open]
+mood-engine apply   [THEME] [--next] [--print] [--dry-run]
+mood-engine use     THEME [--appearance]
+mood-engine library [THEME]
 mood-engine themes
 ```
 
@@ -91,8 +96,84 @@ mood-engine themes
 - In the gallery you can switch theme, keywords, minimum resolution and sources. The
   `JSON` link returns the same ranking as data.
 
-mood-engine only reads `~/.config/themes` and `~/.local/state/themes`. It never writes
-to them.
+mood-engine never writes to `~/.config/themes`. The only file it writes in
+`~/.local/state/themes` is `current.json`, and only when you run `mood-engine use`.
+
+## Switching the theme
+
+`mood-engine use THEME` is the theme index's "apply to all apps" action:
+
+1. It writes the theme id into `~/.local/state/themes/current.json` under the theme's
+   variant (`dark` or `light`) and keeps the other key. The file is replaced atomically.
+   If it is a symlink, the link's target is written.
+2. If the theme is now active (its variant matches the macOS appearance), it sets the
+   theme's wallpaper as `mood-engine apply` would. With nothing saved for the theme, the
+   switch still happens and a note says so.
+
+Apps that follow the themes protocol with live reload pick up the change straight away.
+Others pick it up the next time they start.
+
+Switching to a theme of the other variant, e.g. `use solarized-light` while macOS is
+dark, sets your light theme but changes nothing visible until macOS goes light. Pass
+`--appearance` to also switch macOS to the theme's variant. That goes through System
+Events, so the first time macOS asks to let your terminal control it (System Settings →
+Privacy & Security → Automation).
+
+To change only the wallpaper without touching the global theme, use
+`mood-engine apply THEME`.
+
+## Library: saving wallpapers and switching them with the theme
+
+**Save** on a gallery card downloads the full image into your library and pairs it with
+the theme you are browsing. Save the same image while browsing another theme to pair it
+there too; it isn't downloaded again. After saving, **Set as wallpaper** sets it right
+away. The **Library** tab shows what is saved for a theme:
+
+- **Set as wallpaper** sets it now and marks it as today's wallpaper for the theme.
+- **Pin** fixes this wallpaper for the theme. Without a pin, the theme rotates: each day
+  a random saved wallpaper is drawn, never the same one twice in a row.
+- **Remove** unpairs it from the theme. The file is deleted once no theme uses it.
+
+`mood-engine apply [THEME]` sets the wallpaper for a theme (by default the active one)
+from the library: the pin if there is one, otherwise today's pick, drawing a new one when
+the day has changed.
+
+- `--next` draws a new random wallpaper now (ignored while one is pinned).
+- `--print` prints the file's path instead of setting it, for other wallpaper setters.
+- `--dry-run` shows the choice and changes nothing.
+- `mood-engine library` lists what is saved, pinned and current per theme.
+
+Nothing re-applies the wallpaper when macOS flips between dark and light on its own,
+or when another app writes `current.json`; that is the menu bar app's job. Until then,
+run `mood-engine apply` after such a change, and on a schedule for the daily rotation,
+e.g. with a LaunchAgent
+(`~/Library/LaunchAgents/<label>.plist`) whose `ProgramArguments` call
+`mood-engine apply` with `RunAtLoad` and a `StartCalendarInterval` of `Hour` 6.
+
+**Setting the wallpaper (macOS).** mood-engine calls
+`NSWorkspace.setDesktopImageURL` for every screen through `osascript`'s JavaScript ObjC
+bridge, so it needs no extra Python packages and no Automation permission. macOS only
+changes the *current* Space of each screen. Other Spaces keep their wallpaper until you
+apply again while they are active. Other platforms aren't supported yet; use
+`mood-engine apply --print` with your own setter.
+
+**Where things live.** Nothing is written to the theme index.
+
+```
+~/.local/share/mood-engine/wallpapers/<source>-<id>.<ext>   saved images
+~/.local/share/mood-engine/thumbs/<source>-<id>.jpg          previews for the Library tab
+~/.local/state/mood-engine/library.json                     pairings, pins, current pick
+```
+
+`MOOD_ENGINE_DATA_DIR` and `MOOD_ENGINE_STATE_DIR` override the two directories;
+otherwise `XDG_DATA_HOME` and `XDG_STATE_HOME` are honoured. `library.json` is meant to
+be read by other programs too. Its format and locking rules (an exclusive `flock` on
+`library.lock` for every write, then an atomic rename) are documented at the top of
+`src/mood_engine/library.py`.
+
+**The local server** listens on 127.0.0.1 only. It refuses requests whose `Host` header
+isn't local, and only accepts actions as same-origin JSON `POST`s, so other websites
+can't save or delete files through it. It serves only files that are in the library.
 
 ## How it works
 
@@ -150,10 +231,11 @@ to them.
 
 - **Unsplash:** images are hotlinked from the returned `urls`. Every card says
   "Photo by *name* on Unsplash", with links that carry
-  `utm_source=mood-engine&utm_medium=referral`. **Download** goes through the local
-  server, which calls the photo's `download_location` endpoint before redirecting to
-  the file. The static `--html` output can't do that, so there Download links to the
-  photo page on Unsplash instead.
+  `utm_source=mood-engine&utm_medium=referral`. **Save** and **Recolor** call the
+  photo's `download_location` endpoint before fetching the file, as the API guidelines
+  require. The static `--html` output can't do that, so there Download links to the
+  photo page on Unsplash instead. Saved Unsplash images keep their photographer credit
+  in the Library tab.
 - **Pexels:** each card credits the photographer and links to Pexels.
 - **Wallhaven:** only SFW results are requested, and each card links to the wallpaper's
   page. Wallhaven images come from many uploaders with mixed licences, so check the
@@ -193,6 +275,12 @@ cover:
 - the reader protocol, including `current.json` precedence and the embedded fallback
 - Unsplash and Pexels parsing with mocked responses, and attribution
 - recolouring raising the score
+- the library: storage, rejecting non-images, daily rotation, pins, unpairing and file
+  deletion, and `apply` / `library` (desktop calls mocked)
+- `use`: merging into `current.json`, other-variant themes, `--appearance`, symlinked
+  `current.json` (appearance and desktop calls mocked)
+- the server's save, pair, apply, pin and remove routes against a real local server,
+  including the Unsplash download ping and refusing foreign hosts and origins
 
 ## Known limits / ideas
 

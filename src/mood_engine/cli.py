@@ -1,15 +1,16 @@
-"""mood-engine CLI: `search` (terminal / JSON / static HTML), `serve` (gallery), `themes`.
+"""mood-engine CLI: `search` (terminal / JSON / static HTML), `serve` (gallery), `apply`, `use`, `library`, `themes`.
 
 `mood-engine [THEME] [options]` with no subcommand is short for `mood-engine serve`."""
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
 from pathlib import Path
 
-from . import gallery, pipeline
+from . import desktop, gallery, library, pipeline, selection, themes
 from .sources import ALL_SOURCES
 from .themes import choose_theme, list_themes, load_theme, themes_dir
 
@@ -71,7 +72,100 @@ def cmd_themes(a) -> int:
     return 0
 
 
-COMMANDS = ("search", "serve", "themes")
+def _theme_id(saved: str) -> str | None:
+    """Resolve THEME (or 'system') to an id that exists in the index."""
+    t = choose_theme(saved)
+    if t.id not in list_themes():
+        print(f"error: unknown theme {saved!r} and no theme index to fall back to "
+              f"(themes from {themes_dir()})", file=sys.stderr)
+        return None
+    return t.id
+
+
+def cmd_apply(a) -> int:
+    tid = _theme_id(a.theme)
+    if tid is None:
+        return 2
+    if a.dry_run:
+        lib = copy.deepcopy(library.load())
+        pick = library.choose(lib, tid, force_next=a.next)
+        if pick is None:
+            print(f"error: no wallpapers saved for {tid}", file=sys.stderr)
+            return 1
+        print(f"{tid}: would use {library.file_path(lib, pick)}")
+        return 0
+    try:
+        res = desktop.apply(tid, force_next=a.next, set_desktop=not a.print)
+    except (library.LibraryError, desktop.DesktopError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(res["path"] if a.print else f"{tid}: {res['path']}")
+    return 0
+
+
+def cmd_use(a) -> int:
+    """Switch the global theme, then the wallpaper if the theme is now active."""
+    if a.theme == "system" or a.theme not in list_themes():
+        print(f"error: unknown theme {a.theme!r}; see `mood-engine themes`", file=sys.stderr)
+        return 2
+    theme = load_theme(a.theme)
+    path = selection.set_global(theme)
+    print(f"theme: {theme.variant} → {theme.id}  ({path})")
+    appearance = themes.system_appearance()
+    if theme.variant != appearance:
+        if not a.appearance:
+            print(f"note: macOS is in {appearance} mode, so {theme.id} becomes active when it "
+                  f"switches to {theme.variant} (or pass --appearance). Wallpaper unchanged.")
+            return 0
+        try:
+            desktop.set_appearance(theme.variant == "dark")
+        except desktop.DesktopError as e:
+            print(f"error: could not switch to {theme.variant} mode: {e}", file=sys.stderr)
+            return 1
+        print(f"appearance: {appearance} → {theme.variant}")
+    try:
+        res = desktop.apply(theme.id)
+    except library.LibraryError as e:
+        print(f"note: {e}")
+        return 0
+    except desktop.DesktopError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"wallpaper: {res['path']}")
+    return 0
+
+
+def cmd_library(a) -> int:
+    lib = library.load()
+    ids = sorted(lib["themes"])
+    if a.theme_pos:
+        tid = _theme_id(a.theme)
+        if tid is None:
+            return 2
+        ids = [tid]
+    print(f"# {library.library_path()}")
+    shown = False
+    for tid in ids:
+        t = lib["themes"].get(tid, {})
+        keys = [k for k in t.get("wallpapers", []) if k in lib["wallpapers"]]
+        if not keys:
+            continue
+        shown = True
+        mode = "pinned" if t.get("pinned") in keys else "daily rotation"
+        print(f"{tid}  ({len(keys)} saved, {mode})")
+        for k in keys:
+            mark = ("P" if t.get("pinned") == k else " ") + ("*" if t.get("current") == k else " ")
+            w = lib["wallpapers"][k]
+            score = w.get("scores", {}).get(tid)
+            print(f"  {mark} {score if score is not None else '':>5}  {k:<24} {library.file_path(lib, k)}")
+    if not shown:
+        print("no wallpapers saved yet; run `mood-engine` and press Save in the gallery")
+    else:
+        print("(P = pinned, * = current)")
+    return 0
+
+
+COMMANDS = ("search", "serve", "themes", "apply", "use", "library")
 
 
 def with_default_command(argv: list[str]) -> list[str]:
@@ -115,6 +209,31 @@ def main(argv: list[str] | None = None) -> int:
 
     t = sub.add_parser("themes", help="list themes from the index")
     t.set_defaults(func=cmd_themes)
+
+    def theme_arg(sp):
+        sp.add_argument("theme_pos", nargs="?", metavar="THEME",
+                        help="theme id, or 'system' (the default: the active theme)")
+        sp.add_argument("-t", "--theme", default="system", help="same as THEME")
+
+    ap = sub.add_parser("apply", help="set the desktop wallpaper for a theme from your library")
+    theme_arg(ap)
+    ap.add_argument("--next", action="store_true", help="draw a new random wallpaper even if "
+                    "today's was already chosen (ignored when one is pinned)")
+    ap.add_argument("--print", action="store_true",
+                    help="print the chosen file instead of setting it (for other setters)")
+    ap.add_argument("--dry-run", action="store_true", help="show the choice, change nothing")
+    ap.set_defaults(func=cmd_apply)
+
+    us = sub.add_parser("use", help="switch the global theme (current.json) and its wallpaper")
+    us.add_argument("theme", metavar="THEME", help="theme id from the index")
+    us.add_argument("--appearance", action="store_true",
+                    help="also switch macOS dark/light mode to the theme's variant "
+                         "(asks once for Automation permission)")
+    us.set_defaults(func=cmd_use)
+
+    lb = sub.add_parser("library", help="list saved wallpapers per theme")
+    theme_arg(lb)
+    lb.set_defaults(func=cmd_library)
 
     a = p.parse_args(argv)
     if getattr(a, "theme_pos", None):
