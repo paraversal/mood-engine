@@ -42,9 +42,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import tomllib
-from dataclasses import asdict, dataclass
+from concurrent.futures import Future, ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -57,6 +59,7 @@ OUTPUT_TAIL = 2000
 # Time between the in-between frames of a hook's `fade`. Zed re-reads a changed theme
 # file at most about every 100 ms and merges faster changes.
 FADE_STEP = 0.11
+TERMINAL_FADE_MS = 400  # a `terminal` hook's fade without `fade`
 _sleep = time.sleep  # tests replace it
 
 class HookConfigError(Exception):
@@ -72,6 +75,8 @@ class Hook:
     timeout: float = DEFAULT_TIMEOUT
     enabled: bool = True
     fade: float | None = None  # ms
+    terminal: str | None = None  # an app whose terminals glide via OSC (terminal.fade)
+    after: list[str] = field(default_factory=list)  # hooks above this one to wait for
 
 
 def config_dir() -> Path:
@@ -161,7 +166,8 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
                                       f"(presets: {', '.join(presets.PRESETS)})")
             pre = presets.PRESETS[pname]
             h = {"name": pre.name, **pre.keys, **{k: v for k, v in h.items() if k != "preset"}}
-        unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled", "fade"}
+        unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled", "fade",
+                            "terminal", "after"}
         if unknown:
             raise HookConfigError(f"{path}: hook {i} has unknown key(s) {', '.join(sorted(unknown))}")
         run, tpl, out = h.get("run"), h.get("template"), h.get("output")
@@ -181,9 +187,24 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
                 raise HookConfigError(f"{path}: hook {i}: `fade` is milliseconds, 1 to 10000")
             if tpl is None:
                 raise HookConfigError(f"{path}: hook {i}: `fade` needs `template` and `output`")
+        term = h.get("terminal")
+        if term is not None:
+            if not isinstance(term, str) or term.lower() not in terminal.RELOAD_SIGNALS:
+                raise HookConfigError(f"{path}: hook {i}: `terminal` must be one of "
+                                      f"{', '.join(terminal.RELOAD_SIGNALS)}")
+            if tpl is None:
+                raise HookConfigError(f"{path}: hook {i}: `terminal` needs `template` and `output`")
+        after = h.get("after", [])
+        if isinstance(after, str):
+            after = [after]
+        if not isinstance(after, list) or not all(isinstance(a, str) for a in after):
+            raise HookConfigError(f"{path}: hook {i}: `after` is a hook name or a list of them")
         name = str(h.get("name") or (run.split()[0] if run else Path(tpl).name))
         if name in seen:
             raise HookConfigError(f"{path}: two hooks are named {name!r}")
+        if missing := [a for a in after if a not in seen]:
+            raise HookConfigError(f"{path}: hook {name!r}: `after` names "
+                                  f"{', '.join(map(repr, missing))}, not a hook above it")
         seen.add(name)
         try:
             template_path = _template_path(tpl, path.parent) if tpl else None
@@ -193,7 +214,8 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
                           template=template_path,
                           output=_config_path(out, path.parent) if out else None,
                           timeout=float(timeout), enabled=h.get("enabled", True) is not False,
-                          fade=float(fade) if fade is not None else None))
+                          fade=float(fade) if fade is not None else None,
+                          terminal=term.lower() if term else None, after=after))
     return hooks
 
 
@@ -227,8 +249,10 @@ def hook_fingerprint(h: Hook, theme_fp: str) -> str:
     except OSError:
         tpl = "missing"
     # Keys added later count only when set, so upgrading doesn't rerun every hook.
+    # `after` only changes when a hook runs, not what it does.
     spec = {k: v for k, v in asdict(h).items()
-            if k not in ("timeout", "enabled") and not (k == "fade" and v is None)}
+            if k not in ("timeout", "enabled", "after")
+            and not (k in ("fade", "terminal") and v is None)}
     if h.template and h.template.parent == presets.TEMPLATES_DIR:
         spec["template"] = presets.label(h.template)  # not where mood-engine is installed
     return _sha(theme_fp, spec, tpl)
@@ -284,8 +308,9 @@ def _run_command(cmd: str, env: dict[str, str], timeout: float) -> tuple[int | N
 
 def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str],
              previous: themes.Theme | None = None) -> dict:
-    """Render the hook's template (if any), then run its command (if any). With `fade`
-    and a `previous` theme, the output steps through blended themes first."""
+    """Render the hook's template (if any), glide the `terminal` app into it (if set),
+    then run the command (if any). With `fade` and a `previous` theme, the output steps
+    through blended themes first, or, with `terminal`, the app's terminals glide."""
     t0 = time.monotonic()
     code: int | None = 0
     output = ""
@@ -297,12 +322,20 @@ def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str],
             try:
                 source = h.template.read_text()
                 text = template.render(source, template.context(theme))
-                if (h.fade and previous is not None and previous.id != theme.id
-                        and _read(h.output) != text):
+                if (h.fade and not h.terminal and previous is not None
+                        and previous.id != theme.id and _read(h.output) != text):
                     _fade_frames(h, source, previous, theme)
                 changed = _write_if_changed(h.output, text)
             except (OSError, UnicodeDecodeError, template.TemplateError) as e:
                 code, output = None, f"template {h.template}: {e}"
+    if code == 0 and h.terminal and theme is not None:
+        src = previous if previous is not None and previous.id != theme.id else None
+        try:
+            res = terminal.fade(src, theme, app=h.terminal,
+                                ms=int(h.fade if h.fade is not None else TERMINAL_FADE_MS))
+            output = "\n".join([terminal.describe(res, h.terminal, src, theme), *res.errors])
+        except (OSError, subprocess.SubprocessError, ValueError) as e:
+            code, output = None, f"{h.terminal}: {e}"
     if code == 0 and h.run:
         hook_env = {**os.environ, **env, IN_HOOK_ENV: "1",
                     "MOOD_OUTPUT": str(h.output or ""), "MOOD_OUTPUT_CHANGED": "1" if changed else "0"}
@@ -315,8 +348,22 @@ def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str],
 
 def run_hooks(hooks: list[Hook], env: dict[str, str], theme: themes.Theme | None = None,
               previous: themes.Theme | None = None) -> list[dict]:
-    """Run enabled hooks one after another; a failing hook doesn't stop the rest."""
-    return [run_hook(h, theme, env, previous) for h in hooks if h.enabled]
+    """Run the enabled hooks at the same time, so their fades glide together. A hook
+    with `after` starts once those hooks (when they run too) have finished. A failing
+    hook doesn't stop the rest. Results come back in config order."""
+    hooks = [h for h in hooks if h.enabled]
+    if not hooks:
+        return []
+
+    def run(h: Hook, deps: list[Future]) -> dict:
+        wait(deps)
+        return run_hook(h, theme, env, previous)
+
+    futures: dict[str, Future] = {}
+    with ThreadPoolExecutor(max_workers=len(hooks), thread_name_prefix="hook") as pool:
+        for h in hooks:  # `after` only names hooks above, so their futures exist already
+            futures[h.name] = pool.submit(run, h, [futures[a] for a in h.after if a in futures])
+        return [futures[h.name].result() for h in hooks]
 
 
 def read_state() -> dict:
@@ -334,6 +381,21 @@ def _locked() -> Iterator[None]:
     with open(d / "sync.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         yield
+
+
+class _Background(threading.Thread):
+    """Runs fn(*args) now, in the background; join() waits, `error` is what it raised."""
+
+    def __init__(self, fn, *args) -> None:
+        super().__init__(daemon=True, name="wallpaper")
+        self.fn, self.args, self.error = fn, args, None
+        self.start()
+
+    def run(self) -> None:
+        try:
+            self.fn(*self.args)
+        except Exception as e:  # noqa: BLE001 - reported in the sync's report
+            self.error = e
 
 
 def _now() -> str:
@@ -382,15 +444,16 @@ def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool =
         changed = prev.get("theme") != theme.id
         report["changed"] = changed
         report["edited"] = not changed and prev.get("theme_fp") != theme_fp
+        # Pick the wallpaper first (hooks get its path), but set it while the hooks run:
+        # setting it takes 0.2-0.3 s and would hold up every fade.
         wallpaper = prev.get("wallpaper") if not changed else None
+        setter: _Background | None = None
         if changed or force_wallpaper or prev.get("day") != today_s:
             try:
-                wallpaper = desktop.apply(theme.id)["path"]
-                report["wallpaper_set"] = True
+                wallpaper = desktop.apply(theme.id, set_desktop=False)["path"]
+                setter = _Background(desktop.set_wallpaper, Path(wallpaper))
             except library.LibraryError as e:
                 wallpaper, report["note"] = None, str(e)
-            except desktop.DesktopError as e:
-                report["error"] = f"wallpaper: {e}"
         report["wallpaper"] = wallpaper
 
         try:
@@ -413,6 +476,13 @@ def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool =
             with contextlib.suppress(OSError, ValueError, KeyError):
                 previous = themes.load_theme(prev["theme"])
         ran = run_hooks(due, env, theme, previous) if due else []
+        if setter is not None:
+            setter.join()
+            if setter.error is None:
+                report["wallpaper_set"] = True
+            else:
+                msg = f"wallpaper: {setter.error}"
+                report["error"] = f"{report['error']}; {msg}" if report["error"] else msg
         if ran:
             report["hooks"] = ran
         elif changed or force_hooks:

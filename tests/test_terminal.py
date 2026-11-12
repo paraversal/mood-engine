@@ -175,3 +175,49 @@ def test_hook_gets_mood_engine_and_previous_theme(dirs, mac, monkeypatch):
     first, second = log.read_text().splitlines()
     engine = first.split("|")[0]
     assert engine.endswith("mood-engine") and second == f"{engine}|firebox"
+
+
+
+# --- the `terminal` hook key (the Ghostty preset) -----------------------------------
+
+def test_terminal_hook_glides_in_process(dirs, mac, monkeypatch):
+    calls = []
+
+    def fake_fade(src, dst, **kw):
+        calls.append((src.id if src else None, dst.id, kw))
+        return terminal.FadeResult(ttys=["/dev/ttys001"], reloaded=[1], faded=src is not None,
+                                   seconds=0.4, errors=["/dev/ttys009: could not write"])
+    monkeypatch.setattr(terminal, "fade", fake_fade)
+    monkeypatch.setattr(sync, "_sleep", lambda s: pytest.fail("no file frames with `terminal`"))
+    (dirs / "config").mkdir()
+    out = dirs / "ghostty-theme"
+    sync.hooks_path().write_text(f'[[hook]]\npreset = "ghostty"\noutput = "{out}"\n')
+    sync.sync()
+    mac["appearance"] = "light"
+    rep = sync.sync()
+    assert [c[:2] for c in calls] == [(None, "firebox"), ("firebox", "solarized-light")]
+    assert calls[-1][2] == {"app": "ghostty", "ms": 400}
+    [h] = rep["hooks"]
+    assert h["ok"] and "faded 1 terminal(s) firebox → solarized-light" in h["output"]
+    assert "ttys009" in h["output"] and "background = #fdf6e3" in out.read_text()
+
+
+def test_terminal_hook_failure_is_reported(dirs, mac, monkeypatch):
+    def broken(*a, **kw):
+        raise OSError("ps failed")
+    monkeypatch.setattr(terminal, "fade", broken)
+    (dirs / "config").mkdir()
+    sync.hooks_path().write_text(f'[[hook]]\npreset = "ghostty"\noutput = "{dirs / "g"}"\n')
+    [h] = sync.sync()["hooks"]
+    assert not h["ok"] and h["output"] == "ghostty: ps failed"
+
+
+@pytest.mark.parametrize("body, msg", [
+    ('terminal = "kitty"\ntemplate = "t"\noutput = "o"', "must be one of ghostty"),
+    ('terminal = "ghostty"\nrun = "true"', "needs `template`"),
+])
+def test_terminal_validation(tmp_path, body, msg):
+    p = tmp_path / "hooks.toml"
+    p.write_text(f'[[hook]]\nname = "x"\n{body}\n')
+    with pytest.raises(sync.HookConfigError, match=msg):
+        sync.load_hooks(p)

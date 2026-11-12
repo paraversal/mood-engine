@@ -1,6 +1,7 @@
 """`sync`, hooks, `pin`/`unpin` and `status` (desktop and appearance calls faked)."""
 
 import json
+import time
 from datetime import date, timedelta
 
 import pytest
@@ -327,3 +328,70 @@ def test_init_writes_example_config_and_builtin_css_renders(dirs, mac, monkeypat
     assert cli.main(["render", "builtin:colors.css"]) == 0
     out = capsys.readouterr().out
     assert "--theme-bg: #111111;" in out and "rgba(0, 0, 0, 0.5)" in out and "{{" not in out
+
+
+# --- hooks run at the same time ------------------------------------------------------
+
+def test_hooks_run_at_the_same_time_in_config_order(dirs, mac, hooks):
+    hooks(*[f'\n[[hook]]\nname = "slow{i}"\nrun = "sleep 0.4"\n' for i in range(3)])
+    t0 = time.monotonic()
+    rep = sync.sync()
+    assert time.monotonic() - t0 < 1.0                         # not 1.2 s one after another
+    assert [h["name"] for h in rep["hooks"]] == ["log", "slow0", "slow1", "slow2"]
+    assert all(h["ok"] for h in rep["hooks"])
+
+
+def test_after_waits_for_the_named_hooks(dirs, mac, hooks):
+    done = dirs / "a-done"
+    hooks(f'\n[[hook]]\nname = "a"\nrun = "sleep 0.3 && touch {done}"\n'
+          f'\n[[hook]]\nname = "b"\nafter = "a"\nrun = "test -f {done}"\n'
+          f'\n[[hook]]\nname = "c"\nafter = ["log", "b"]\nrun = "test -f {done}"\n')
+    rep = sync.sync()
+    assert [h["ok"] for h in rep["hooks"]] == [True, True, True, True]
+    assert sync.load_hooks()[3].after == ["log", "b"]
+
+
+@pytest.mark.parametrize("body, msg", [
+    ('[[hook]]\nname = "a"\nrun = "true"\nafter = "b"\n'
+     '[[hook]]\nname = "b"\nrun = "true"\n', "not a hook above it"),
+    ('[[hook]]\nname = "a"\nrun = "true"\nafter = "a"\n', "not a hook above it"),
+    ('[[hook]]\nname = "a"\nrun = "true"\nafter = 3\n', "hook name or a list"),
+])
+def test_after_validation(tmp_path, body, msg):
+    p = tmp_path / "hooks.toml"
+    p.write_text(body)
+    with pytest.raises(sync.HookConfigError, match=msg):
+        sync.load_hooks(p)
+
+
+def test_after_is_not_part_of_the_fingerprint():
+    a, b = sync.Hook(name="x", run="true"), sync.Hook(name="x", run="true", after=["y"])
+    assert sync.hook_fingerprint(a, "fp") == sync.hook_fingerprint(b, "fp")
+
+
+def test_wallpaper_is_set_while_the_hooks_run(dirs, mac, hooks, monkeypatch):
+    from mood_engine import desktop
+    log = dirs / "wp.log"
+    hooks(f'\n[[hook]]\nname = "wp"\nrun = "sleep 0.4; echo $MOOD_WALLPAPER > {log}"\n')
+    monkeypatch.setattr(desktop, "set_wallpaper",
+                        lambda p: (time.sleep(0.4), mac["wallpapers"].append(p.name)))
+    save("w:a")
+    t0 = time.monotonic()
+    rep = sync.sync()
+    assert time.monotonic() - t0 < 0.7                       # not 0.8 s one after the other
+    assert rep["wallpaper_set"] and mac["wallpapers"] == ["w-a.png"]
+    assert log.read_text().strip().endswith("w-a.png")       # hooks still get the path
+
+
+def test_wallpaper_failure_is_reported_and_hooks_still_run(dirs, mac, hooks, monkeypatch):
+    from mood_engine import desktop
+
+    def fail(p):
+        raise desktop.DesktopError("osascript failed")
+    monkeypatch.setattr(desktop, "set_wallpaper", fail)
+    hooks()
+    save("w:a")
+    rep = sync.sync()
+    assert rep["error"] == "wallpaper: osascript failed" and not rep["wallpaper_set"]
+    assert [h["ok"] for h in rep["hooks"]] == [True] and hooks.lines() == ["firebox  dark"]
+    assert sync.read_state()["error"] == "wallpaper: osascript failed"

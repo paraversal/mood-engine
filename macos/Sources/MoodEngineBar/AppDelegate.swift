@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("AppleInterfaceThemeChangedNotification"), object: nil, queue: .main
         ) { [weak self] _ in
+            // effectiveAppearance can lag this notification; look now and once more shortly.
+            self?.appearanceMayHaveChanged()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.appearanceMayHaveChanged() }
         }
         let wsnc = NSWorkspace.shared.notificationCenter
@@ -78,11 +80,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         gallery?.terminate()
     }
 
+    /// A dark/light flip syncs at once, with no debounce: the rest of macOS has already
+    /// switched, so every moment here is a moment the fades start late. The `lastDark`
+    /// check already makes the second of macOS's two signals for one flip a no-op.
+    /// (File changes and wake still go through `syncSoon`, which merges bursts.)
     private func appearanceMayHaveChanged() {
         let dark = Desktop.isDark
         guard dark != lastDark else { return }
         lastDark = dark
-        syncSoon.poke()
+        sync()
     }
 
     // MARK: - Running the CLI

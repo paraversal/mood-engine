@@ -36,7 +36,7 @@ def test_example_config_hooks_all_parse(tmp_path):
     p.write_text("\n".join(lines) + "\n")
     hooks = {h.name: h for h in sync.load_hooks(p)}
     assert list(hooks) == ["Ghostty", "Zed", "CSS variables", "Alacritty", "my widget"]
-    assert hooks["Ghostty"].run == '"$MOOD_ENGINE" fade' and hooks["Ghostty"].timeout == 10
+    assert (hooks["Ghostty"].terminal, hooks["Ghostty"].fade, hooks["Ghostty"].run) == ("ghostty", 400, None)
     assert hooks["Zed"].fade == 1200 and hooks["Zed"].template == presets.builtin_path("zed.json")
     assert str(hooks["CSS variables"].output).endswith("somewhere/else/colors.css")
     assert hooks["Alacritty"].template == tmp_path / "templates" / "alacritty.toml"
@@ -82,7 +82,7 @@ def test_hooks_listing_presets_and_render(dirs, mac, capsys):
     assert cli.main(["hooks", "--presets"]) == 0
     out = capsys.readouterr().out
     assert 'preset = "ghostty" stands for:' in out and "theme = mood-engine" in out
-    assert "run = '\"$MOOD_ENGINE\" fade'" in out
+    assert 'terminal = "ghostty"' in out
     assert cli.main(["render", "builtin:nope"]) == 2
 
 

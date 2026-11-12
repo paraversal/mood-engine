@@ -39,3 +39,10 @@ def firebox():
 @pytest.fixture
 def solarized_light():
     return theme_from_dict("solarized-light", SOLARIZED_LIGHT)
+
+
+@pytest.fixture(autouse=True)
+def no_real_terminals(monkeypatch):
+    """No test finds (and so signals or writes to) the real Ghostty or its terminals."""
+    from mood_engine import terminal
+    monkeypatch.setattr(terminal, "processes", lambda: [])

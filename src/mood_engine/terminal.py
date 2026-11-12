@@ -175,6 +175,16 @@ class FadeResult:
     errors: list[str]
 
 
+def describe(res: FadeResult, app: str, src: Theme | None, dst: Theme) -> str:
+    """One line for the CLI and a hook's output."""
+    if not res.ttys and not res.reloaded:
+        return f"{app}: not running"
+    did = (f"faded {len(res.ttys)} terminal(s) {src.id} → {dst.id}" if res.faded and src
+           else f"{dst.id}, nothing to fade from" if src is None or src.id == dst.id
+           else f"{dst.id}, same colours")
+    return f"{app}: {did} in {res.seconds:g} s" + (", reloaded" if res.reloaded else "")
+
+
 def fade(src: Theme | None, dst: Theme, *, app: str = "ghostty", ms: int = 400, fps: int = 60,
          reload: bool = True, ttys: list[str] | None = None, pids: list[int] | None = None,
          kill: Callable[[int, int], None] = os.kill,
@@ -194,6 +204,7 @@ def fade(src: Theme | None, dst: Theme, *, app: str = "ghostty", ms: int = 400, 
     a, b = (colours(src) if src else None), colours(dst)
     animate = a is not None and a != b and ms > 0
     fds, errors = _open(ttys) if animate or not reload else ({}, [])
+    animate = animate and bool(fds)  # no terminal to glide: don't sleep through frames
 
     def broadcast(data: bytes, must: bool = False) -> None:
         for path, fd in list(fds.items()):

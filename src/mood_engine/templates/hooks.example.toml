@@ -1,10 +1,11 @@
 # mood-engine hooks: keep other apps in line with the active theme.
 #
 # A hook can render a template into an app's theme file, run a command, or both
-# (render first, then run). Hooks run in order, when what they depend on changes:
-# a different active theme (`mood-engine use`, macOS switching dark/light, another
-# app writing current.json), an edited scheme, or an edit to the hook or its
-# template. `mood-engine hooks --run [NAME]` runs them now.
+# (render first, then run). Hooks run when what they depend on changes: a different
+# active theme (`mood-engine use`, macOS switching dark/light, another app writing
+# current.json), an edited scheme, or an edit to the hook or its template. They all
+# start at the same time, so fades glide together; `after` orders them where needed.
+# `mood-engine hooks --run [NAME]` runs them now.
 #
 # ── Presets ──────────────────────────────────────────────────────────────────
 #
@@ -46,6 +47,11 @@
 #   fade      milliseconds (e.g. 800): when the theme changes, write in-between
 #             themes to `output` about every 110 ms before the final one, for apps
 #             that reload the file by themselves. Needs `template`.
+#   terminal  "ghostty": after writing `output`, glide the app's open terminals
+#             from the previous theme to this one (in `fade` ms, default 400) with
+#             terminal colour sequences, then make the app reload its config
+#   after     a hook name, or a list of them, defined above this one: wait for
+#             those to finish first (otherwise all hooks start at once)
 #   run       shell command (/bin/sh -c), run after the output is written
 #   timeout   seconds, default 30; the command and everything it started is killed
 #   enabled   default true

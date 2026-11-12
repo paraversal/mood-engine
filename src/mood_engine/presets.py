@@ -32,10 +32,10 @@ class Preset:
 PRESETS: dict[str, Preset] = {
     "ghostty": Preset(
         name="Ghostty",
-        description="Ghostty's theme file; fades open terminals into the new theme, "
-                    "then reloads Ghostty",
+        description="Ghostty's theme file; open terminals glide into the new theme and "
+                    "Ghostty reloads",
         keys={"template": "builtin:ghostty", "output": "~/.config/ghostty/themes/mood-engine",
-              "run": '"$MOOD_ENGINE" fade', "timeout": 10},
+              "terminal": "ghostty", "fade": 400},
         app_config="~/.config/ghostty/config:  theme = mood-engine",
     ),
     "zed": Preset(

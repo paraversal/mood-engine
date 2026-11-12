@@ -307,13 +307,7 @@ def cmd_fade(a) -> int:
             print(f"  {t}")
         return 0
     res = terminal.fade(src, dst, app=app, ms=a.ms, reload=reload)
-    if not res.ttys and not res.reloaded:
-        print(f"{app}: not running")
-    else:
-        did = (f"faded {len(res.ttys)} terminal(s) {src.id} → {tid}" if res.faded
-               else f"{tid}, nothing to fade from" if src is None or src.id == tid
-               else f"{tid}, same colours")
-        print(f"{app}: {did} in {res.seconds:g} s" + (", reloaded" if res.reloaded else ""))
+    print(terminal.describe(res, app, src, dst))
     for e in res.errors:
         print(f"note: {e}", file=sys.stderr)
     return 0

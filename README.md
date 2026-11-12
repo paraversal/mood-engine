@@ -217,7 +217,7 @@ line by hooks. A hook renders a template into the app's theme file, runs a comma
 
 ```
 ~/.config/mood-engine/
-  hooks.toml          the hooks, in order
+  hooks.toml          the hooks
   templates/          your own templates (paths are relative to hooks.toml)
 ```
 
@@ -242,7 +242,7 @@ fade = 1200          # slower than the preset's 800 ms
 
 | Preset    | Template              | Output                                   | Then                      |
 |-----------|-----------------------|------------------------------------------|---------------------------|
-| `ghostty` | `builtin:ghostty`     | `~/.config/ghostty/themes/mood-engine`   | runs `mood-engine fade`   |
+| `ghostty` | `builtin:ghostty`     | `~/.config/ghostty/themes/mood-engine`   | `terminal = "ghostty"`, `fade = 400` |
 | `zed`     | `builtin:zed.json`    | `~/.config/zed/themes/mood-engine.json`  | `fade = 800`              |
 | `css`     | `builtin:colors.css`  | `~/.cache/mood-engine/colors.css`        | –                         |
 
@@ -296,9 +296,14 @@ mood-engine render --vars                           # every variable and its val
 mood-engine, since the menu bar app's `PATH` may not have it), `THEMES_DIR` and
 `THEMES_STATE_DIR`. `MOOD_PREVIOUS_THEME` is empty unless the active theme changed.
 
-**Running them:** see the table above for when a sync runs hooks. `mood-engine hooks`
-lists them with their last run; `mood-engine hooks --run [NAME …]` runs all or some now.
-A failing hook doesn't stop the others; its exit code and the end of its output are
+**Running them:** see the table above for when a sync runs hooks. They all start at the
+same time, so Ghostty's and Zed's fades glide together and a slow hook doesn't hold up
+the rest: a switch takes as long as the slowest hook (about 0.7 s with Ghostty, Zed and
+two Übersicht widgets, down from 1.7 s one after another). When a hook needs another
+one's result, `after = "Name"` (or a list of names) makes it wait for those; they must
+be defined above it. `mood-engine hooks` lists them with their last run;
+`mood-engine hooks --run [NAME …]` runs all or some now. A failing hook doesn't stop
+the others; its exit code and the end of its output are
 kept in `sync.json` and shown in the menu bar app. A hook runs once per change, even if
 it failed, so a broken one isn't retried in a loop; fix it and it runs again. Hooks must
 not call `mood-engine use` or `sync` (such calls are skipped).
@@ -312,7 +317,7 @@ hook keeps it in line: add the preset and point Ghostty at the theme.
 [[hook]]
 preset = "ghostty"
 # stands for: template = "builtin:ghostty", output = "~/.config/ghostty/themes/mood-engine",
-#             run = '"$MOOD_ENGINE" fade', timeout = 10
+#             terminal = "ghostty", fade = 400
 ```
 
 ```
@@ -324,8 +329,11 @@ Use a single `theme = mood-engine`, not Ghostty's `light:…,dark:…` form: moo
 already follows the macOS appearance, and with one file every switch, including a
 dark/light flip, goes through the fade.
 
-`mood-engine fade` glides every open Ghostty terminal from `$MOOD_PREVIOUS_THEME` to the
-new theme in 400 ms, then leaves Ghostty on the reloaded theme file:
+`terminal = "ghostty"` makes the hook glide every open Ghostty terminal from the previous
+theme to the new one, in `fade` ms (400 by default), right after writing the theme
+file, and leaves Ghostty on the reloaded file. It runs inside mood-engine, which saves
+the 0.2 s it takes to start another one. `mood-engine fade` does the same from the
+command line, or from your own hook's `run = '"$MOOD_ENGINE" fade'`:
 
 1. It writes the old theme's colours to each terminal's tty as OSC colour sequences
    (ANSI 0–15, foreground, background, cursor), as a program in the terminal could.
@@ -336,7 +344,7 @@ new theme in 400 ms, then leaves Ghostty on the reloaded theme file:
 4. It drops the OSC colours again (OSC 104/110/111/112). What's left is the reloaded
    config, which by then shows the same colours.
 
-With no previous theme (the first sync, an edited scheme, `hooks --run`), `fade` only
+With no previous theme (the first sync, an edited scheme, `hooks --run`), it only
 reloads. It finds the terminals as the ttys of the processes Ghostty started, so it needs
 no permissions. It only *sets* colours and never asks the terminal for any, because the
 answer would arrive in the shell as typed input. `--dry-run` lists the terminals it
@@ -548,11 +556,15 @@ cover:
   symlinked outputs; per-hook fingerprints (edited scheme, edited template, new or
   re-enabled hook); config validation; a stowed (symlinked) config and its watch paths;
   `render` and `hooks --run NAME`
-- Ghostty: the template renders the same colours the fade uses, finding terminals through a root-owned `login`, and the fade on a real
-  pseudo-terminal: old colours pinned before the reload, every colour ending on the new
-  theme, the pins dropped last; reload only without a previous theme; `--no-reload`;
-  unopenable ttys; `fade` reading the hook environment; `MOOD_ENGINE` in hooks. No
-  test signals a real process or runs your real hooks.
+- hooks at the same time: they overlap and report in config order; `after` waits for
+  the named hooks, must name hooks above it, and isn't part of the fingerprint
+- Ghostty: the template renders the same colours the fade uses, finding terminals
+  through a root-owned `login`, and the fade on a real pseudo-terminal: old colours
+  pinned before the reload, every colour ending on the new theme, the pins dropped
+  last; reload only without a previous theme; `--no-reload`; unopenable ttys; `fade`
+  reading the hook environment; `MOOD_ENGINE` in hooks; the `terminal` key gliding
+  from the previous theme in-process (no file frames), its errors and validation. No
+  test signals a real process or runs your real hooks: every test sees no terminals.
 - Zed: the template renders a theme family with the theme's colours and Ghostty's
   ANSI colours; blending (end points, OKLab midpoint, variant flip); a hook's `fade`
   writing eased frames from the previous theme before the final file, and skipping
