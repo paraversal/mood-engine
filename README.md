@@ -23,6 +23,7 @@ uv run mood-engine firebox                # gallery for a given theme
 uv run mood-engine search firebox         # ranked list in the terminal
 uv run mood-engine apply                  # set a saved wallpaper for the active theme
 uv run mood-engine use firebox            # switch the global theme, then its wallpaper
+./macos/build.sh --install                # menu bar app (see "Menu bar app")
 ```
 
 `uv tool install -e .` puts `mood-engine` on your PATH.
@@ -84,7 +85,13 @@ mood-engine search ... [--json] [--html out/gallery.html]
 mood-engine serve  ... [--port 8765] [--no-open]
 mood-engine apply   [THEME] [--next] [--print] [--dry-run]
 mood-engine use     THEME [--appearance]
+mood-engine sync    [--appearance dark|light] [--wallpaper] [--hooks] [--force] [--json]
+mood-engine hooks   [--init] [--run [NAME ...]]
+mood-engine render  [TEMPLATE] [THEME] [-o OUT] [--vars]
+mood-engine pin     [THEME] [--key SOURCE:ID]
+mood-engine unpin   [THEME]
 mood-engine library [THEME]
+mood-engine status  [--appearance dark|light]
 mood-engine themes
 ```
 
@@ -97,7 +104,8 @@ mood-engine themes
   `JSON` link returns the same ranking as data.
 
 mood-engine never writes to `~/.config/themes`. The only file it writes in
-`~/.local/state/themes` is `current.json`, and only when you run `mood-engine use`.
+`~/.local/state/themes` is `current.json`, and only when you run `mood-engine use` (or
+pick a theme in the menu bar app).
 
 ## Switching the theme
 
@@ -109,9 +117,10 @@ mood-engine never writes to `~/.config/themes`. The only file it writes in
 2. If the theme is now active (its variant matches the macOS appearance), it sets the
    theme's wallpaper as `mood-engine apply` would. With nothing saved for the theme, the
    switch still happens and a note says so.
+3. If the active theme changed, it runs your [hooks](#hooks-for-apps-without-live-reload).
 
 Apps that follow the themes protocol with live reload pick up the change straight away.
-Others pick it up the next time they start.
+Others need a hook, or pick it up the next time they start.
 
 Switching to a theme of the other variant, e.g. `use solarized-light` while macOS is
 dark, sets your light theme but changes nothing visible until macOS goes light. Pass
@@ -143,12 +152,12 @@ the day has changed.
 - `--dry-run` shows the choice and changes nothing.
 - `mood-engine library` lists what is saved, pinned and current per theme.
 
-Nothing re-applies the wallpaper when macOS flips between dark and light on its own,
-or when another app writes `current.json`; that is the menu bar app's job. Until then,
-run `mood-engine apply` after such a change, and on a schedule for the daily rotation,
-e.g. with a LaunchAgent
-(`~/Library/LaunchAgents/<label>.plist`) whose `ProgramArguments` call
-`mood-engine apply` with `RunAtLoad` and a `StartCalendarInterval` of `Hour` 6.
+- `mood-engine pin [THEME]` pins the theme's current wallpaper (`--key` picks another
+  saved one); `mood-engine unpin [THEME]` goes back to daily rotation.
+
+The [menu bar app](#menu-bar-app) re-applies the wallpaper when macOS flips between dark
+and light on its own, when another app writes `current.json`, and when the day changes.
+Without it, run `mood-engine sync` after such a change.
 
 **Setting the wallpaper (macOS).** mood-engine calls
 `NSWorkspace.setDesktopImageURL` for every screen through `osascript`'s JavaScript ObjC
@@ -174,6 +183,130 @@ be read by other programs too. Its format and locking rules (an exclusive `flock
 **The local server** listens on 127.0.0.1 only. It refuses requests whose `Host` header
 isn't local, and only accepts actions as same-origin JSON `POST`s, so other websites
 can't save or delete files through it. It serves only files that are in the library.
+
+## Keeping everything in sync
+
+`mood-engine sync` brings the desktop in line with the active theme (what apps set to
+"System" show: `current.json`, then `defaults.json`, for the macOS appearance) and
+compares it with the last sync, kept in `~/.local/state/mood-engine/sync.json`:
+
+| Since the last sync                     | Wallpaper            | Hooks            |
+|-----------------------------------------|----------------------|------------------|
+| active theme changed                    | set                  | all run          |
+| same theme, colours edited in a scheme  | –                    | all run          |
+| a hook or its template edited, or added | –                    | that hook runs   |
+| same theme, new day                     | set (daily rotation) | –                |
+| nothing                                 | –                    | –                |
+
+Each hook remembers a fingerprint of what it last ran for: the theme's colours, its
+own definition and its template. `--wallpaper` and `--hooks` force either one, `--force`
+both. A lock serialises
+concurrent syncs, so one change never runs the hooks twice, even when `mood-engine use`
+and the menu bar app both notice it. `--json` prints a report; `status` prints
+everything the menu bar app shows.
+
+### Hooks: keeping other apps in line
+
+Apps that don't read the theme index, or don't reload it on their own, are kept in
+line by hooks. A hook renders a template into the app's theme file, runs a command
+(a reload signal, a widget refresh, a restart), or both: render first, then run.
+
+**Where they live:** `~/.config/mood-engine/` (`$MOOD_ENGINE_CONFIG_DIR`, or
+`$XDG_CONFIG_HOME/mood-engine`):
+
+```
+~/.config/mood-engine/
+  hooks.toml          the hooks, in order
+  templates/          templates the hooks render (paths are relative to hooks.toml)
+```
+
+Both can come from a dotfiles repo with GNU stow (e.g. a `mood-engine` package holding
+`.config/mood-engine/hooks.toml` and `.config/mood-engine/templates/…`). The menu bar app
+watches the real files the symlinks point to, so editing them in the repo counts.
+`mood-engine hooks --init` writes a commented `hooks.toml` and an example
+`templates/colors.css` if there is none.
+
+```toml
+[[hook]]
+name = "CSS variables"
+template = "templates/colors.css"           # relative to hooks.toml
+output = "~/.cache/mood-engine/colors.css"  # written atomically, only when it changes
+
+[[hook]]
+name = "fs-health widget"
+run = "osascript -e 'tell application id \"tracesOf.Uebersicht\" to reload widget id \"fs-health-widget-index-jsx\"'"
+timeout = 10         # seconds, default 30; the command and all it started are killed after it
+# enabled = false
+```
+
+For Übersicht, reload a single widget as above: it keeps the widget's DOM and state,
+so CSS transitions can glide to the new colours. The global `refresh` reloads the whole
+page, loses widget state, and can leave the webview blank.
+
+**Templates** use the [tinted-theming](https://github.com/tinted-theming/home) builder
+variables, so existing base16/base24 templates for many apps work unchanged:
+`{{scheme-name}}`, `{{scheme-slug}}`, `{{scheme-variant}}`, `{{base08-hex}}`,
+`{{base08-rgb-r}}`, `{{base08-dec-r}}`, `{{base08-hex-bgr}}`, … for `base00`–`base17`. The
+theme's roles come with the same suffixes: `{{role-bg-hex}}`, `{{role-accent-rgb-r}}`,
+and so on. Sections work on `scheme-is-dark-variant` / `scheme-is-light-variant`
+(`{{#…}}…{{/…}}`, inverted `{{^…}}`). Unknown variables are an error, so a typo never
+writes a broken theme file; the hook fails and the old output stays.
+
+```bash
+mood-engine render templates/colors.css             # preview with the active theme
+mood-engine render templates/colors.css solarized-light -o /tmp/x.css
+mood-engine render --vars                           # every variable and its value
+```
+
+**Commands** run with `/bin/sh -c` and get `MOOD_THEME`, `MOOD_THEME_NAME`,
+`MOOD_VARIANT`, `MOOD_PREVIOUS_THEME`, `MOOD_APPEARANCE`, `MOOD_WALLPAPER`, `MOOD_OUTPUT`
+(the rendered file), `MOOD_OUTPUT_CHANGED` (`1`/`0`), `THEMES_DIR` and
+`THEMES_STATE_DIR`.
+
+**Running them:** see the table above for when a sync runs hooks. `mood-engine hooks`
+lists them with their last run; `mood-engine hooks --run [NAME …]` runs all or some now.
+A failing hook doesn't stop the others; its exit code and the end of its output are
+kept in `sync.json` and shown in the menu bar app. A hook runs once per change, even if
+it failed, so a broken one isn't retried in a loop; fix it and it runs again. Hooks must
+not call `mood-engine use` or `sync` (such calls are skipped).
+
+## Menu bar app
+
+`macos/` holds a small native menu bar app (Swift, AppKit, macOS 14+). It keeps no logic
+of its own: it watches for changes and calls the CLI.
+
+```bash
+./macos/build.sh             # builds macos/build/mood-engine.app
+./macos/build.sh --install   # copies it to ~/Applications and starts it
+```
+
+It needs Xcode or the Command Line Tools. The app runs the repo's
+`.venv/bin/mood-engine` (path baked in at build time; run `uv sync` first), or else
+`mood-engine` on your login shell's `PATH`, or one you pick from its menu. Hooks get
+your login shell's `PATH` too.
+
+**When it syncs:** on launch; when macOS switches between dark and light, including on
+its own schedule; when `current.json`, `defaults.json`, a scheme, `hooks.toml` or a
+template changes (watched at their real paths, so stow symlinks and edits in the
+dotfiles repo count); after waking from sleep;
+and when the day changes (daily rotation). When you switch Spaces or plug in a screen,
+a Space that still shows another wallpaper gets the current one (turn off
+**Keep Wallpaper on Every Space** to leave other Spaces alone).
+
+**The menu** shows the active theme and its wallpaper, and offers:
+
+- Next Wallpaper, Pin / Unpin, Find Wallpapers… (the gallery) and Library…. The app
+  starts `mood-engine serve` on first use and stops it when it quits.
+- Dark Theme / Light Theme submenus that set the global theme for that variant (as
+  `mood-engine use` does) and Switch to Light/Dark Mode. Switching the appearance goes
+  through System Events, so macOS asks once for Automation permission. Because the app
+  is ad-hoc signed, it may ask again after a rebuild.
+- Hooks: the last run with ✓/✗ per hook (click one for its output), Run Hooks Now and
+  Edit hooks.toml….
+- Re-apply Wallpaper, Open at Login, Quit.
+
+The menu bar icon turns into a warning triangle when a hook failed or a sync hit an
+error; the menu has the details.
 
 ## How it works
 
@@ -281,6 +414,17 @@ cover:
   `current.json` (appearance and desktop calls mocked)
 - the server's save, pair, apply, pin and remove routes against a real local server,
   including the Unsplash download ping and refusing foreign hosts and origins
+- `sync`: first sync, no-op, appearance flips, daily rotation without hooks,
+  `current.json` written by another app, `use` running hooks exactly once
+- hooks: environment, failures and timeouts (process group killed), disabled hooks, a
+  broken `hooks.toml`, nested calls from a hook; `pin`/`unpin` and `status`
+- templates: tinted-theming variables and roles, sections, standalone tag lines, errors
+  for unknown variables; rendering before the command, writing only on change,
+  symlinked outputs; per-hook fingerprints (edited scheme, edited template, new or
+  re-enabled hook); config validation; a stowed (symlinked) config and its watch paths;
+  `render` and `hooks --run NAME`
+
+The menu bar app has no automated tests; build it with `./macos/build.sh`.
 
 ## Known limits / ideas
 

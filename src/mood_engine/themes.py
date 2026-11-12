@@ -57,6 +57,7 @@ class Theme:
     variant: Appearance
     palette: dict[str, str]
     roles: dict[str, str] = field(default_factory=dict)
+    author: str = ""
 
 
 def themes_dir() -> Path:
@@ -126,6 +127,7 @@ def theme_from_dict(id: str, data: dict, role_map: dict[str, str] | None = None)
         variant="light" if variant == "light" else "dark",
         palette=palette,
         roles=resolve_roles(palette, mapping),
+        author=str(data.get("author") or ""),
     )
 
 
