@@ -245,6 +245,7 @@ fade = 1200          # slower than the preset's 800 ms
 | `ghostty` | `builtin:ghostty`     | `~/.config/ghostty/themes/mood-engine`   | `terminal = "ghostty"`, `fade = 400` |
 | `zed`     | `builtin:zed.json`    | `~/.config/zed/themes/mood-engine.json`  | `fade = 800`              |
 | `css`     | `builtin:colors.css`  | `~/.cache/mood-engine/colors.css`        | –                         |
+| `json`    | `builtin:theme.json`  | `~/.cache/mood-engine/theme.json`        | `notify = "local.mood-engine.theme"`, `fade = 800` |
 
 `mood-engine hooks --presets` prints each preset's keys and the line the app's own
 config needs. The built-in templates live in
@@ -263,6 +264,7 @@ name = "Alacritty"
 template = "templates/alacritty.toml"       # relative to hooks.toml
 output = "~/.config/alacritty/theme.toml"   # written atomically, only when it changes
 # fade = 800         # ms: step the file through in-between themes first (see Zed)
+# notify = "my.app.theme"  # post this Darwin notification after each write (see Theme JSON)
 
 [[hook]]
 name = "fs-health widget"
@@ -402,6 +404,61 @@ Zed re-reads a changed theme file at most about 10 times a second; faster change
 are merged (measured with Zed 1.28: 40 writes 16 ms apart gave 7 reloads, 10 writes
 100 ms apart gave 9). So the fade is a glide in about 8 steps rather than Ghostty's 60
 frames a second. A longer `fade` gives more steps; each step redraws every Zed window.
+
+### Theme JSON, for native apps and tweaks
+
+```toml
+[[hook]]
+preset = "json"
+# stands for: template = "builtin:theme.json", output = "~/.cache/mood-engine/theme.json",
+#             notify = "local.mood-engine.theme", fade = 800
+```
+
+This hands the active theme to anything that can read a file: a native tweak, a Swift
+app, SketchyBar, Hammerspoon, a shell script with `jq`. The file holds the theme's id,
+its variant, every role and `base00`–`base17` as `#rrggbb`:
+
+```json
+{"id": "gruvbox-dark-hard", "variant": "dark",
+ "roles": {"bg": "#1d2021", "accent": "#83a598", …}, "palette": {"base00": "#1d2021", …}}
+```
+
+After every write, the hook posts the Darwin notification `local.mood-engine.theme`
+(`notify_post(3)`). Any process can listen, sandboxed ones too, and a post nobody
+listens to costs nothing. With `fade`, the file steps through in-between themes like
+Zed's, with a post after each step, so a listener that just applies the colours it reads
+glides along with Ghostty and Zed. The final write always posts, even when the file
+didn't change, so `mood-engine hooks --run "Theme JSON"` nudges a listener that started
+late. Watch it from a shell:
+
+```bash
+while notifyutil -1 local.mood-engine.theme; do jq -c .roles.bg ~/.cache/mood-engine/theme.json; done
+```
+
+In Objective-C (a menu bar app, or a tweak injected into Finder), read the file once at
+start and again on every post:
+
+```objc
+#import <notify.h>
+
+static void MoodApply(void) {
+    NSString *path = [@"~/.cache/mood-engine/theme.json" stringByExpandingTildeInPath];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    NSDictionary *theme = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSString *bg = theme[@"roles"][@"bg"];   // "#1d2021"
+    if (bg) { /* turn it into an NSColor and apply it */ }
+}
+
+int token;
+MoodApply();
+notify_register_dispatch("local.mood-engine.theme", &token, dispatch_get_main_queue(),
+                         ^(int t) { MoodApply(); });
+```
+
+A sandboxed process can receive the notification but not read `~/.cache`. Point `output`
+somewhere it can read, or have it read through a helper. Finder and the Dock aren't
+sandboxed. Any `[[hook]]` with a `template` can post a notification with `notify = "NAME"`.
+The theme's name is left out of the JSON because templates don't escape quotes.
 
 ## Menu bar app
 

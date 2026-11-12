@@ -62,6 +62,31 @@ FADE_STEP = 0.11
 TERMINAL_FADE_MS = 400  # a `terminal` hook's fade without `fade`
 _sleep = time.sleep  # tests replace it
 
+_libsystem = None
+
+
+def _notify_post(name: str) -> str | None:
+    """Post a Darwin notification (notify(3)) that any process can subscribe to with
+    notify_register_dispatch or `notifyutil -w NAME`. None on success, else an error.
+    A no-op off macOS."""
+    global _libsystem
+    if sys.platform != "darwin":
+        return None
+    try:
+        if _libsystem is None:
+            import ctypes
+            lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            lib.notify_post.argtypes = [ctypes.c_char_p]
+            lib.notify_post.restype = ctypes.c_uint32
+            _libsystem = lib
+        status = _libsystem.notify_post(name.encode())
+    except (OSError, AttributeError) as e:
+        return f"notify {name}: {e}"
+    return None if status == 0 else f"notify {name}: notify_post returned {status}"
+
+
+_post = _notify_post  # tests replace it
+
 class HookConfigError(Exception):
     pass
 
@@ -77,6 +102,7 @@ class Hook:
     fade: float | None = None  # ms
     terminal: str | None = None  # an app whose terminals glide via OSC (terminal.fade)
     after: list[str] = field(default_factory=list)  # hooks above this one to wait for
+    notify: str | None = None  # Darwin notification posted after each write of `output`
 
 
 def config_dir() -> Path:
@@ -167,7 +193,7 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
             pre = presets.PRESETS[pname]
             h = {"name": pre.name, **pre.keys, **{k: v for k, v in h.items() if k != "preset"}}
         unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled", "fade",
-                            "terminal", "after"}
+                            "terminal", "after", "notify"}
         if unknown:
             raise HookConfigError(f"{path}: hook {i} has unknown key(s) {', '.join(sorted(unknown))}")
         run, tpl, out = h.get("run"), h.get("template"), h.get("output")
@@ -194,6 +220,13 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
                                       f"{', '.join(terminal.RELOAD_SIGNALS)}")
             if tpl is None:
                 raise HookConfigError(f"{path}: hook {i}: `terminal` needs `template` and `output`")
+        notify = h.get("notify")
+        if notify is not None:
+            if not isinstance(notify, str) or not notify.strip():
+                raise HookConfigError(f"{path}: hook {i}: `notify` must be a non-empty string "
+                                      f"(a notification name such as local.mood-engine.theme)")
+            if tpl is None:
+                raise HookConfigError(f"{path}: hook {i}: `notify` needs `template` and `output`")
         after = h.get("after", [])
         if isinstance(after, str):
             after = [after]
@@ -215,7 +248,8 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
                           output=_config_path(out, path.parent) if out else None,
                           timeout=float(timeout), enabled=h.get("enabled", True) is not False,
                           fade=float(fade) if fade is not None else None,
-                          terminal=term.lower() if term else None, after=after))
+                          terminal=term.lower() if term else None, after=after,
+                          notify=notify.strip() if notify else None))
     return hooks
 
 
@@ -252,7 +286,7 @@ def hook_fingerprint(h: Hook, theme_fp: str) -> str:
     # `after` only changes when a hook runs, not what it does.
     spec = {k: v for k, v in asdict(h).items()
             if k not in ("timeout", "enabled", "after")
-            and not (k in ("fade", "terminal") and v is None)}
+            and not (k in ("fade", "terminal", "notify") and v is None)}
     if h.template and h.template.parent == presets.TEMPLATES_DIR:
         spec["template"] = presets.label(h.template)  # not where mood-engine is installed
     return _sha(theme_fp, spec, tpl)
@@ -279,12 +313,16 @@ def _write_if_changed(path: Path, text: str) -> bool:
 
 
 def _fade_frames(h: Hook, source: str, previous: themes.Theme, theme: themes.Theme) -> None:
-    """Write the in-between frames of the hook's fade (not the final one) to its output."""
+    """Write the in-between frames of the hook's fade (not the final one) to its output,
+    posting the hook's `notify` after each. A frame's failed post is ignored; the final
+    post reports it."""
     n = max(1, round(h.fade / 1000 / FADE_STEP))
     path = _real(h.output)
     for i in range(1, n):
         mid = themes.blend(previous, theme, terminal.ease_in_out(i / n))
         library._atomic_write(path, template.render(source, template.context(mid)).encode())
+        if h.notify:
+            _post(h.notify)
         _sleep(FADE_STEP)
 
 
@@ -328,6 +366,10 @@ def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str],
                 changed = _write_if_changed(h.output, text)
             except (OSError, UnicodeDecodeError, template.TemplateError) as e:
                 code, output = None, f"template {h.template}: {e}"
+            # Posted even when the file didn't change, so `hooks --run` can nudge a
+            # listener that started late.
+            if code == 0 and h.notify and (err := _post(h.notify)):
+                code, output = None, err
     if code == 0 and h.terminal and theme is not None:
         src = previous if previous is not None and previous.id != theme.id else None
         try:

@@ -29,6 +29,12 @@
 # preset = "css"
 # output = "~/somewhere/else/colors.css"
 #
+# The theme as JSON (~/.cache/mood-engine/theme.json), stepped through in-between
+# themes over 800 ms, posting the Darwin notification local.mood-engine.theme after
+# each write: for native apps and tweaks, SketchyBar, Hammerspoon or scripts.
+# [[hook]]
+# preset = "json"
+#
 # ── Your own hooks ───────────────────────────────────────────────────────────
 #
 # Keys:
@@ -50,6 +56,10 @@
 #   terminal  "ghostty": after writing `output`, glide the app's open terminals
 #             from the previous theme to this one (in `fade` ms, default 400) with
 #             terminal colour sequences, then make the app reload its config
+#   notify    a Darwin notification name (e.g. "my.app.theme"): posted after every
+#             write of `output`, fade steps included, and once at the end even when
+#             nothing changed. Listen with notify_register_dispatch or
+#             `notifyutil -w NAME`. Needs `template`.
 #   after     a hook name, or a list of them, defined above this one: wait for
 #             those to finish first (otherwise all hooks start at once)
 #   run       shell command (/bin/sh -c), run after the output is written

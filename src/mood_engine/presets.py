@@ -19,6 +19,7 @@ from pathlib import Path
 BUILTIN_PREFIX = "builtin:"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 EXAMPLE_HOOKS = "hooks.example.toml"  # in TEMPLATES_DIR, written by `hooks --init`
+NOTIFY_NAME = "local.mood-engine.theme"  # the json preset's Darwin notification
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,16 @@ PRESETS: dict[str, Preset] = {
         description="the theme's roles as --theme-* CSS custom properties",
         keys={"template": "builtin:colors.css", "output": "~/.cache/mood-engine/colors.css"},
         app_config="@import or <link> ~/.cache/mood-engine/colors.css",
+    ),
+    "json": Preset(
+        name="Theme JSON",
+        description="the theme's roles and palette as JSON, stepped from the previous "
+                    "theme, with a Darwin notification after each write (for native "
+                    "tweaks, SketchyBar, Hammerspoon, scripts)",
+        keys={"template": "builtin:theme.json", "output": "~/.cache/mood-engine/theme.json",
+              "notify": NOTIFY_NAME, "fade": 800},
+        app_config=f"re-read the file whenever {NOTIFY_NAME} is posted "
+                   f"(notify_register_dispatch, or `notifyutil -w {NOTIFY_NAME}`)",
     ),
 }
 
