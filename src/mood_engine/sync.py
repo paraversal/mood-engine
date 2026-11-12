@@ -48,11 +48,15 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from . import desktop, library, template, terminal, themes
+from . import desktop, library, template, terminal, themes, zed
 
 IN_HOOK_ENV = "MOOD_ENGINE_IN_HOOK"
 DEFAULT_TIMEOUT = 30
 OUTPUT_TAIL = 2000
+# Time between the in-between frames of a hook's `fade`. Zed re-reads a changed theme
+# file at most about every 100 ms and merges faster changes.
+FADE_STEP = 0.11
+_sleep = time.sleep  # tests replace it
 
 HOOKS_TEMPLATE = """\
 # mood-engine hooks: keep other apps in line with the active theme.
@@ -71,6 +75,9 @@ HOOKS_TEMPLATE = """\
 #             `mood-engine render TEMPLATE` previews it; `--vars` lists variables.
 #   output    where the rendered file goes (~ allowed; relative = this folder).
 #             Written atomically, and only when its content changes.
+#   fade      milliseconds (e.g. 800): when the theme changes, write in-between
+#             themes to `output` about every 110 ms before the final one, for apps
+#             that reload the file by themselves (Zed). Needs `template`.
 #   run       shell command (/bin/sh -c), run after the output is written
 #   timeout   seconds, default 30; the command and everything it started is killed
 #   enabled   default true
@@ -99,6 +106,14 @@ HOOKS_TEMPLATE = """\
 # output = "~/.config/ghostty/themes/mood-engine"
 # run = '"$MOOD_ENGINE" fade'
 # timeout = 10
+#
+# Zed: set "theme": "mood-engine" in settings.json. Zed reloads the file by itself,
+# so there is no command; `fade` steps it from the previous theme to this one.
+# [[hook]]
+# name = "Zed"
+# template = "templates/zed.json"
+# output = "~/.config/zed/themes/mood-engine.json"
+# fade = 800
 #
 # Übersicht: reload one widget (keeps its DOM, so CSS transitions can glide). Its id is
 # the widget's path with / and . turned into -. Avoid the global `refresh`: it
@@ -141,6 +156,7 @@ class Hook:
     output: Path | None = None
     timeout: float = DEFAULT_TIMEOUT
     enabled: bool = True
+    fade: float | None = None  # ms
 
 
 def config_dir() -> Path:
@@ -158,7 +174,8 @@ def sync_path() -> Path:
     return library.state_dir() / "sync.json"
 
 
-EXAMPLE_TEMPLATES = {"colors.css": EXAMPLE_TEMPLATE, "ghostty": terminal.GHOSTTY_TEMPLATE}
+EXAMPLE_TEMPLATES = {"colors.css": EXAMPLE_TEMPLATE, "ghostty": terminal.GHOSTTY_TEMPLATE,
+                     "zed.json": zed.ZED_TEMPLATE}
 
 
 def init_hooks() -> tuple[Path, bool, list[Path]]:
@@ -211,7 +228,7 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
     for i, h in enumerate(raw, 1):
         if not isinstance(h, dict):
             raise HookConfigError(f"{path}: hook {i} is not a table")
-        unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled"}
+        unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled", "fade"}
         if unknown:
             raise HookConfigError(f"{path}: hook {i} has unknown key(s) {', '.join(sorted(unknown))}")
         run, tpl, out = h.get("run"), h.get("template"), h.get("output")
@@ -225,6 +242,12 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
         timeout = h.get("timeout", DEFAULT_TIMEOUT)
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
             raise HookConfigError(f"{path}: hook {i} has an invalid timeout")
+        fade = h.get("fade")
+        if fade is not None:
+            if isinstance(fade, bool) or not isinstance(fade, (int, float)) or not 0 < fade <= 10000:
+                raise HookConfigError(f"{path}: hook {i}: `fade` is milliseconds, 1 to 10000")
+            if tpl is None:
+                raise HookConfigError(f"{path}: hook {i}: `fade` needs `template` and `output`")
         name = str(h.get("name") or (run.split()[0] if run else Path(tpl).name))
         if name in seen:
             raise HookConfigError(f"{path}: two hooks are named {name!r}")
@@ -232,7 +255,8 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
         hooks.append(Hook(name=name, run=run,
                           template=_config_path(tpl, path.parent) if tpl else None,
                           output=_config_path(out, path.parent) if out else None,
-                          timeout=float(timeout), enabled=h.get("enabled", True) is not False))
+                          timeout=float(timeout), enabled=h.get("enabled", True) is not False,
+                          fade=float(fade) if fade is not None else None))
     return hooks
 
 
@@ -264,21 +288,40 @@ def hook_fingerprint(h: Hook, theme_fp: str) -> str:
         tpl = h.template.read_bytes().hex() if h.template else None
     except OSError:
         tpl = "missing"
-    spec = {k: v for k, v in asdict(h).items() if k not in ("timeout", "enabled")}
+    # Keys added later count only when set, so upgrading doesn't rerun every hook.
+    spec = {k: v for k, v in asdict(h).items()
+            if k not in ("timeout", "enabled") and not (k == "fade" and v is None)}
     return _sha(theme_fp, spec, tpl)
 
 
-def _write_if_changed(path: Path, text: str) -> bool:
-    """Atomic write; a symlinked output keeps its link and its target is written."""
-    if path.is_symlink():
-        path = path.resolve()
+def _real(path: Path) -> Path:
+    """A symlinked output keeps its link; its target is written."""
+    return path.resolve() if path.is_symlink() else path
+
+
+def _read(path: Path) -> str | None:
     try:
-        if path.read_text() == text:
-            return False
+        return _real(path).read_text()
     except (OSError, UnicodeDecodeError):
-        pass
-    library._atomic_write(path, text.encode())
+        return None
+
+
+def _write_if_changed(path: Path, text: str) -> bool:
+    """Atomic write, skipped when the file already holds `text`."""
+    if _read(path) == text:
+        return False
+    library._atomic_write(_real(path), text.encode())
     return True
+
+
+def _fade_frames(h: Hook, source: str, previous: themes.Theme, theme: themes.Theme) -> None:
+    """Write the in-between frames of the hook's fade (not the final one) to its output."""
+    n = max(1, round(h.fade / 1000 / FADE_STEP))
+    path = _real(h.output)
+    for i in range(1, n):
+        mid = themes.blend(previous, theme, terminal.ease_in_out(i / n))
+        library._atomic_write(path, template.render(source, template.context(mid)).encode())
+        _sleep(FADE_STEP)
 
 
 def _run_command(cmd: str, env: dict[str, str], timeout: float) -> tuple[int | None, str]:
@@ -299,8 +342,10 @@ def _run_command(cmd: str, env: dict[str, str], timeout: float) -> tuple[int | N
         return None, f"timed out after {timeout:g} s\n{rest or ''}"
 
 
-def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str]) -> dict:
-    """Render the hook's template (if any), then run its command (if any)."""
+def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str],
+             previous: themes.Theme | None = None) -> dict:
+    """Render the hook's template (if any), then run its command (if any). With `fade`
+    and a `previous` theme, the output steps through blended themes first."""
     t0 = time.monotonic()
     code: int | None = 0
     output = ""
@@ -310,7 +355,11 @@ def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str]) -> dict:
             code, output = None, "no theme to render"
         else:
             try:
-                text = template.render(h.template.read_text(), template.context(theme))
+                source = h.template.read_text()
+                text = template.render(source, template.context(theme))
+                if (h.fade and previous is not None and previous.id != theme.id
+                        and _read(h.output) != text):
+                    _fade_frames(h, source, previous, theme)
                 changed = _write_if_changed(h.output, text)
             except (OSError, UnicodeDecodeError, template.TemplateError) as e:
                 code, output = None, f"template {h.template}: {e}"
@@ -324,9 +373,10 @@ def run_hook(h: Hook, theme: themes.Theme | None, env: dict[str, str]) -> dict:
             "at": _now()}
 
 
-def run_hooks(hooks: list[Hook], env: dict[str, str], theme: themes.Theme | None = None) -> list[dict]:
+def run_hooks(hooks: list[Hook], env: dict[str, str], theme: themes.Theme | None = None,
+              previous: themes.Theme | None = None) -> list[dict]:
     """Run enabled hooks one after another; a failing hook doesn't stop the rest."""
-    return [run_hook(h, theme, env) for h in hooks if h.enabled]
+    return [run_hook(h, theme, env, previous) for h in hooks if h.enabled]
 
 
 def read_state() -> dict:
@@ -418,7 +468,11 @@ def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool =
                "MOOD_APPEARANCE": appearance, "MOOD_WALLPAPER": wallpaper or "",
                "MOOD_ENGINE": engine_command(),
                "THEMES_DIR": str(themes.themes_dir()), "THEMES_STATE_DIR": str(themes.state_dir())}
-        ran = run_hooks(due, env, theme) if due else []
+        previous = None
+        if changed and prev.get("theme"):
+            with contextlib.suppress(OSError, ValueError, KeyError):
+                previous = themes.load_theme(prev["theme"])
+        ran = run_hooks(due, env, theme, previous) if due else []
         if ran:
             report["hooks"] = ran
         elif changed or force_hooks:

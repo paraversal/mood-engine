@@ -192,7 +192,8 @@ def cmd_hooks(a) -> int:
         off = "" if h.enabled else "  (disabled)"
         print(f"- {h.name}{off}")
         if h.template:
-            print(f"    render {h.template} → {h.output}")
+            fade = f"  (fade {h.fade:g} ms)" if h.fade else ""
+            print(f"    render {h.template} → {h.output}{fade}")
         if h.run:
             print(f"    run    {h.run}")
     if path.exists() and not hooks:

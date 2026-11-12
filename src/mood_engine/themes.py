@@ -60,6 +60,27 @@ class Theme:
     author: str = ""
 
 
+def blend(a: Theme, b: Theme, x: float) -> Theme:
+    """`b` with every palette slot and role mixed from `a` by 1 - x, in OKLab, for the
+    in-between frames of a fade. x = 0 gives a's colours, x = 1 is b. The variant flips
+    halfway, so an app's dark/light chrome switches once."""
+    from .color import hex_to_oklab, oklab_to_hex
+
+    def mix(colours_a: dict[str, str], colours_b: dict[str, str]) -> dict[str, str]:
+        out = {}
+        for k, hb in colours_b.items():
+            ha = colours_a.get(k)
+            if ha is None or x >= 1:
+                out[k] = hb
+            else:
+                la = hex_to_oklab(ha)
+                out[k] = oklab_to_hex(la + (hex_to_oklab(hb) - la) * x)
+        return out
+    return Theme(id=b.id, name=b.name, author=b.author,
+                 variant=b.variant if x >= 0.5 else a.variant,
+                 palette=mix(a.palette, b.palette), roles=mix(a.roles, b.roles))
+
+
 def themes_dir() -> Path:
     if d := os.environ.get("THEMES_DIR"):
         return Path(d)

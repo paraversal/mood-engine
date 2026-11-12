@@ -225,14 +225,16 @@ Both can come from a dotfiles repo with GNU stow (e.g. a `mood-engine` package h
 `.config/mood-engine/hooks.toml` and `.config/mood-engine/templates/…`). The menu bar app
 watches the real files the symlinks point to, so editing them in the repo counts.
 `mood-engine hooks --init` writes a commented `hooks.toml` and the example templates
-`templates/colors.css` and `templates/ghostty`, each only if it doesn't exist yet, so
-running it again on an existing setup just adds templates that are new.
+`templates/colors.css`, `templates/ghostty` and `templates/zed.json`, each only if it
+doesn't exist yet, so running it again on an existing setup just adds templates that
+are new.
 
 ```toml
 [[hook]]
 name = "CSS variables"
 template = "templates/colors.css"           # relative to hooks.toml
 output = "~/.cache/mood-engine/colors.css"  # written atomically, only when it changes
+# fade = 800         # ms: step the file through in-between themes first (see Zed)
 
 [[hook]]
 name = "fs-health widget"
@@ -330,6 +332,44 @@ Caveats:
 - For another terminal that understands OSC 4/10/11/12 (kitty, WezTerm, iTerm2),
   `fade --app NAME --no-reload` glides its terminals and leaves the new colours set,
   but it can't make that app reload its own config.
+
+### Zed, with a stepped fade
+
+Zed reads theme families from `~/.config/zed/themes` and re-reads a file there when it
+changes, so the hook needs no command. `mood-engine hooks --init` writes the template
+(`templates/zed.json`); then add the hook and select the theme in Zed's settings:
+
+```toml
+[[hook]]
+name = "Zed"
+template = "templates/zed.json"
+output = "~/.config/zed/themes/mood-engine.json"
+fade = 800
+```
+
+```jsonc
+// ~/.config/zed/settings.json
+"theme": "mood-engine",
+```
+
+The template fills all 142 colours of Zed's theme schema (v0.2.0) from the theme's
+roles; syntax colours follow the base16 styling guide, and Zed's terminal gets the same
+ANSI colours as Ghostty. As with Ghostty, use the single theme rather than Zed's
+`{"mode": "system", …}` form, so a dark/light flip goes through mood-engine and fades.
+
+**`fade`** works for any hook with a template whose app reloads the file by itself.
+When the active theme changes, the hook first writes in-between themes to the output,
+about every 110 ms, then the final file. The in-between themes mix every palette slot
+and role of the previous and the new theme in OKLab, eased in and out, so any template
+works unchanged. The variant flips halfway, so Zed's dark/light window chrome switches
+once. Without a previous theme (the first sync, an edited scheme or template,
+`hooks --run`) or when the file already shows the new theme, it writes the final file
+straight away.
+
+Zed re-reads a changed theme file at most about 10 times a second; faster changes
+are merged (measured with Zed 1.28: 40 writes 16 ms apart gave 7 reloads, 10 writes
+100 ms apart gave 9). So the fade is a glide in about 8 steps rather than Ghostty's 60
+frames a second. A longer `fade` gives more steps; each step redraws every Zed window.
 
 ## Menu bar app
 
@@ -491,6 +531,12 @@ cover:
   unopenable ttys; `fade` reading the hook environment; `MOOD_ENGINE` in hooks;
   `hooks --init` adding a missing template without touching existing files. No test
   signals a real process or runs your real hooks.
+- Zed: the template renders a theme family with the theme's colours and Ghostty's
+  ANSI colours; blending (end points, OKLab midpoint, variant flip); a hook's `fade`
+  writing eased frames from the previous theme before the final file, and skipping
+  them without a previous theme or when the file is already current; `fade`
+  validation; hooks without `fade` keep their fingerprint; `hooks --init` and the
+  example hook.
 
 The menu bar app has no automated tests; build it with `./macos/build.sh`.
 
