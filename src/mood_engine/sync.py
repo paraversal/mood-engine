@@ -37,8 +37,10 @@ import fcntl
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
+import sys
 import time
 import tomllib
 from dataclasses import asdict, dataclass
@@ -46,7 +48,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from . import desktop, library, template, themes
+from . import desktop, library, template, terminal, themes
 
 IN_HOOK_ENV = "MOOD_ENGINE_IN_HOOK"
 DEFAULT_TIMEOUT = 30
@@ -77,7 +79,7 @@ HOOKS_TEMPLATE = """\
 #   MOOD_THEME, MOOD_THEME_NAME, MOOD_VARIANT (dark|light), MOOD_PREVIOUS_THEME,
 #   MOOD_APPEARANCE (macOS: dark|light), MOOD_WALLPAPER (path or empty),
 #   MOOD_OUTPUT (the rendered file), MOOD_OUTPUT_CHANGED (1 or 0),
-#   THEMES_DIR, THEMES_STATE_DIR
+#   MOOD_ENGINE (this mood-engine executable), THEMES_DIR, THEMES_STATE_DIR
 #
 # Don't call `mood-engine use` or `mood-engine sync` from a hook.
 #
@@ -87,6 +89,16 @@ HOOKS_TEMPLATE = """\
 # name = "CSS variables"
 # template = "templates/colors.css"
 # output = "~/.cache/mood-engine/colors.css"
+#
+# Ghostty: set `theme = mood-engine` in its config. The template writes the theme
+# file; `fade` glides the open terminals from the previous theme to this one and
+# makes Ghostty reload its config.
+# [[hook]]
+# name = "Ghostty"
+# template = "templates/ghostty"
+# output = "~/.config/ghostty/themes/mood-engine"
+# run = '"$MOOD_ENGINE" fade'
+# timeout = 10
 #
 # Übersicht: reload one widget (keeps its DOM, so CSS transitions can glide). Its id is
 # the widget's path with / and . turned into -. Avoid the global `refresh`: it
@@ -146,18 +158,35 @@ def sync_path() -> Path:
     return library.state_dir() / "sync.json"
 
 
-def init_hooks() -> tuple[Path, bool]:
-    """Write the commented template if hooks.toml doesn't exist. Returns (path, created)."""
+EXAMPLE_TEMPLATES = {"colors.css": EXAMPLE_TEMPLATE, "ghostty": terminal.GHOSTTY_TEMPLATE}
+
+
+def init_hooks() -> tuple[Path, bool, list[Path]]:
+    """Write the commented hooks.toml and the example templates, each only if it doesn't
+    exist (or is a dangling symlink, which is left alone). Returns (hooks.toml, whether
+    it was written, the templates written)."""
     p = hooks_path()
-    if p.exists():
-        return p, False
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(HOOKS_TEMPLATE)
-    example = p.parent / "templates" / "colors.css"
-    if not example.exists():
-        example.parent.mkdir(exist_ok=True)
-        example.write_text(EXAMPLE_TEMPLATE)
-    return p, True
+    created = not p.exists() and not p.is_symlink()
+    if created:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(HOOKS_TEMPLATE)
+    written = []
+    for name, text in EXAMPLE_TEMPLATES.items():
+        t = p.parent / "templates" / name
+        if not t.exists() and not t.is_symlink():
+            t.parent.mkdir(parents=True, exist_ok=True)
+            t.write_text(text)
+            written.append(t)
+    return p, created, written
+
+
+def engine_command() -> str:
+    """This mood-engine, for hooks (the menu bar app's PATH may not have it): the
+    `mood-engine` script next to the running interpreter, else the one on PATH."""
+    exe = Path(sys.executable).parent / "mood-engine"
+    if exe.is_file() and os.access(exe, os.X_OK):
+        return str(exe)
+    return shutil.which("mood-engine") or "mood-engine"
 
 
 def _config_path(value: str, base: Path) -> Path:
@@ -387,6 +416,7 @@ def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool =
                "MOOD_VARIANT": theme.variant,
                "MOOD_PREVIOUS_THEME": (prev.get("theme") or "") if changed else "",
                "MOOD_APPEARANCE": appearance, "MOOD_WALLPAPER": wallpaper or "",
+               "MOOD_ENGINE": engine_command(),
                "THEMES_DIR": str(themes.themes_dir()), "THEMES_STATE_DIR": str(themes.state_dir())}
         ran = run_hooks(due, env, theme) if due else []
         if ran:

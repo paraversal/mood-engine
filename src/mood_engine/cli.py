@@ -1,5 +1,5 @@
 """mood-engine CLI: `search` (terminal / JSON / static HTML), `serve` (gallery), `apply`, `use`,
-`sync`, `hooks`, `render`, `pin`/`unpin`, `library`, `status`, `themes`.
+`sync`, `hooks`, `render`, `fade`, `pin`/`unpin`, `library`, `status`, `themes`.
 
 `mood-engine [THEME] [options]` with no subcommand is short for `mood-engine serve`."""
 
@@ -8,10 +8,11 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import sys
 from pathlib import Path
 
-from . import desktop, gallery, library, pipeline, selection, themes
+from . import desktop, gallery, library, pipeline, selection, terminal, themes
 from . import sync as syncmod
 from . import template as tplmod
 from .sources import ALL_SOURCES
@@ -164,8 +165,10 @@ def cmd_sync(a) -> int:
 
 def cmd_hooks(a) -> int:
     if a.init:
-        path, created = syncmod.init_hooks()
+        path, created, templates = syncmod.init_hooks()
         print(f"{'wrote' if created else 'already exists:'} {path}")
+        for t in templates:
+            print(f"wrote {t}")
         return 0
     if a.run is not None:
         if a.run:
@@ -227,6 +230,51 @@ def cmd_render(a) -> int:
         print(f"wrote {out} ({tid})", file=sys.stderr)
     else:
         sys.stdout.write(text)
+    return 0
+
+
+def cmd_fade(a) -> int:
+    """Glide running terminals to a theme, then make them load it for good."""
+    to = a.theme
+    if to == "system" and os.environ.get("MOOD_THEME"):
+        to = os.environ["MOOD_THEME"]  # in a hook: the theme being switched to
+    tid = _theme_id(to)
+    if tid is None:
+        return 2
+    dst = load_theme(tid)
+    src_id = a.src if a.src is not None else os.environ.get("MOOD_PREVIOUS_THEME", "")
+    src = None
+    if src_id:
+        if src_id in list_themes():
+            src = load_theme(src_id)
+        else:
+            print(f"note: unknown theme {src_id!r} to fade from; switching directly",
+                  file=sys.stderr)
+    app = a.app
+    reload = not a.no_reload
+    if reload and app.lower() not in terminal.RELOAD_SIGNALS:
+        print(f"error: don't know how to make {app} reload its config; pass --no-reload "
+              f"(known: {', '.join(terminal.RELOAD_SIGNALS)})", file=sys.stderr)
+        return 2
+    if a.dry_run:
+        procs = terminal.processes()
+        ttys, pids = terminal.app_ttys(app, procs), terminal.app_pids(app, procs)
+        what = f"fade {src.id} → {tid}" if src else f"switch to {tid} (nothing to fade from)"
+        print(f"{app}: would {what} on {len(ttys)} terminal(s)"
+              + (f", then reload pid {', '.join(map(str, pids))}" if reload and pids else ""))
+        for t in ttys:
+            print(f"  {t}")
+        return 0
+    res = terminal.fade(src, dst, app=app, ms=a.ms, reload=reload)
+    if not res.ttys and not res.reloaded:
+        print(f"{app}: not running")
+    else:
+        did = (f"faded {len(res.ttys)} terminal(s) {src.id} → {tid}" if res.faded
+               else f"{tid}, nothing to fade from" if src is None or src.id == tid
+               else f"{tid}, same colours")
+        print(f"{app}: {did} in {res.seconds:g} s" + (", reloaded" if res.reloaded else ""))
+    for e in res.errors:
+        print(f"note: {e}", file=sys.stderr)
     return 0
 
 
@@ -335,8 +383,8 @@ def cmd_library(a) -> int:
     return 0
 
 
-COMMANDS = ("search", "serve", "themes", "apply", "use", "sync", "hooks", "render", "pin", "unpin",
-            "library", "status")
+COMMANDS = ("search", "serve", "themes", "apply", "use", "sync", "hooks", "render", "fade", "pin",
+            "unpin", "library", "status")
 
 
 def with_default_command(argv: list[str]) -> list[str]:
@@ -420,7 +468,8 @@ def main(argv: list[str] | None = None) -> int:
 
     hk = sub.add_parser("hooks", help="list the hooks run after a theme change")
     hk.add_argument("--init", action="store_true",
-                    help="write a commented hooks.toml and an example template")
+                    help="write a commented hooks.toml and the example templates "
+                         "(only files that don't exist yet)")
     hk.add_argument("--run", nargs="*", metavar="NAME",
                     help="run them now for the active theme (all, or the named ones)")
     hk.set_defaults(func=cmd_hooks)
@@ -433,6 +482,21 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("-o", "--output", help="write here instead of printing")
     rd.add_argument("--vars", action="store_true", help="list the template variables and values")
     rd.set_defaults(func=cmd_render)
+
+    fd = sub.add_parser("fade", help="glide running terminals (Ghostty) to a theme, then reload "
+                        "them; for hooks")
+    theme_arg(fd)
+    fd.add_argument("--from", dest="src", metavar="THEME",
+                    help="theme the terminals show now (default: $MOOD_PREVIOUS_THEME; "
+                         "without one, only reload)")
+    fd.add_argument("--app", default="ghostty", help="terminal app whose terminals to fade "
+                    "(process name, default ghostty)")
+    fd.add_argument("--ms", type=int, default=400, help="duration in ms (default 400)")
+    fd.add_argument("--no-reload", action="store_true",
+                    help="don't signal the app to reload; leave the new colours set on "
+                         "the open terminals")
+    fd.add_argument("--dry-run", action="store_true", help="list the terminals, change nothing")
+    fd.set_defaults(func=cmd_fade)
 
     for name, text in (("pin", "pin the theme's current wallpaper (or --key)"),
                        ("unpin", "go back to daily rotation for the theme")):

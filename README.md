@@ -88,6 +88,7 @@ mood-engine use     THEME [--appearance]
 mood-engine sync    [--appearance dark|light] [--wallpaper] [--hooks] [--force] [--json]
 mood-engine hooks   [--init] [--run [NAME ...]]
 mood-engine render  [TEMPLATE] [THEME] [-o OUT] [--vars]
+mood-engine fade    [THEME] [--from THEME] [--app ghostty] [--ms 400] [--no-reload] [--dry-run]
 mood-engine pin     [THEME] [--key SOURCE:ID]
 mood-engine unpin   [THEME]
 mood-engine library [THEME]
@@ -223,8 +224,9 @@ line by hooks. A hook renders a template into the app's theme file, runs a comma
 Both can come from a dotfiles repo with GNU stow (e.g. a `mood-engine` package holding
 `.config/mood-engine/hooks.toml` and `.config/mood-engine/templates/…`). The menu bar app
 watches the real files the symlinks point to, so editing them in the repo counts.
-`mood-engine hooks --init` writes a commented `hooks.toml` and an example
-`templates/colors.css` if there is none.
+`mood-engine hooks --init` writes a commented `hooks.toml` and the example templates
+`templates/colors.css` and `templates/ghostty`, each only if it doesn't exist yet, so
+running it again on an existing setup just adds templates that are new.
 
 ```toml
 [[hook]]
@@ -260,8 +262,9 @@ mood-engine render --vars                           # every variable and its val
 
 **Commands** run with `/bin/sh -c` and get `MOOD_THEME`, `MOOD_THEME_NAME`,
 `MOOD_VARIANT`, `MOOD_PREVIOUS_THEME`, `MOOD_APPEARANCE`, `MOOD_WALLPAPER`, `MOOD_OUTPUT`
-(the rendered file), `MOOD_OUTPUT_CHANGED` (`1`/`0`), `THEMES_DIR` and
-`THEMES_STATE_DIR`.
+(the rendered file), `MOOD_OUTPUT_CHANGED` (`1`/`0`), `MOOD_ENGINE` (the path of this
+mood-engine, since the menu bar app's `PATH` may not have it), `THEMES_DIR` and
+`THEMES_STATE_DIR`. `MOOD_PREVIOUS_THEME` is empty unless the active theme changed.
 
 **Running them:** see the table above for when a sync runs hooks. `mood-engine hooks`
 lists them with their last run; `mood-engine hooks --run [NAME …]` runs all or some now.
@@ -269,6 +272,64 @@ A failing hook doesn't stop the others; its exit code and the end of its output 
 kept in `sync.json` and shown in the menu bar app. A hook runs once per change, even if
 it failed, so a broken one isn't retried in a loop; fix it and it runs again. Hooks must
 not call `mood-engine use` or `sync` (such calls are skipped).
+
+### Ghostty, with a fade between themes
+
+Ghostty reads its colours from a theme file and reloads its config on `SIGUSR2`, so one
+hook keeps it in line. `mood-engine hooks --init` writes the template
+(`templates/ghostty`); then add the hook and point Ghostty at the theme:
+
+```toml
+[[hook]]
+name = "Ghostty"
+template = "templates/ghostty"
+output = "~/.config/ghostty/themes/mood-engine"
+run = '"$MOOD_ENGINE" fade'
+timeout = 10
+```
+
+```
+# ~/.config/ghostty/config
+theme = mood-engine
+```
+
+Use a single `theme = mood-engine`, not Ghostty's `light:…,dark:…` form: mood-engine
+already follows the macOS appearance, and with one file every switch, including a
+dark/light flip, goes through the fade.
+
+`mood-engine fade` glides every open Ghostty terminal from `$MOOD_PREVIOUS_THEME` to the
+new theme in 400 ms, then leaves Ghostty on the reloaded theme file:
+
+1. It writes the old theme's colours to each terminal's tty as OSC colour sequences
+   (ANSI 0–15, foreground, background, cursor), as a program in the terminal could.
+2. It sends Ghostty `SIGUSR2`. Ghostty reloads the config, which now names the new
+   theme, but colours set by OSC win over the config, so nothing changes on screen yet.
+3. It steps those colours to the new theme's in OKLab, eased in and out, about 60
+   times a second.
+4. It drops the OSC colours again (OSC 104/110/111/112). What's left is the reloaded
+   config, which by then shows the same colours.
+
+With no previous theme (the first sync, an edited scheme, `hooks --run`), `fade` only
+reloads. It finds the terminals as the ttys of the processes Ghostty started, so it needs
+no permissions. It only *sets* colours and never asks the terminal for any, because the
+answer would arrive in the shell as typed input. `--dry-run` lists the terminals it
+would touch. `--from`/`THEME` override the two themes, so
+`mood-engine fade solarized-light --from firebox` previews a switch without changing
+anything else (Ghostty reloads, but its theme file is unchanged).
+
+Caveats:
+
+- The in-between colours come from the mapping built into mood-engine (black is
+  `base01`, bright colours are base24's `base12`–`base17`). If you change the template's
+  mapping, the fade ends with a small step to your template's colours.
+- Programs that set the terminal's colours themselves lose those at step 4. Programs
+  that draw in true colour, like Neovim with `termguicolors`, keep their own colours
+  and don't fade.
+- On a dark/light flip, the fade starts once the menu bar app has noticed the flip and
+  run the hooks, a moment after the rest of macOS has switched.
+- For another terminal that understands OSC 4/10/11/12 (kitty, WezTerm, iTerm2),
+  `fade --app NAME --no-reload` glides its terminals and leaves the new colours set,
+  but it can't make that app reload its own config.
 
 ## Menu bar app
 
@@ -423,6 +484,13 @@ cover:
   symlinked outputs; per-hook fingerprints (edited scheme, edited template, new or
   re-enabled hook); config validation; a stowed (symlinked) config and its watch paths;
   `render` and `hooks --run NAME`
+- Ghostty: the template renders the same colours the fade uses (and its example hook
+  parses), finding terminals through a root-owned `login`, and the fade on a real
+  pseudo-terminal: old colours pinned before the reload, every colour ending on the new
+  theme, the pins dropped last; reload only without a previous theme; `--no-reload`;
+  unopenable ttys; `fade` reading the hook environment; `MOOD_ENGINE` in hooks;
+  `hooks --init` adding a missing template without touching existing files. No test
+  signals a real process or runs your real hooks.
 
 The menu bar app has no automated tests; build it with `./macos/build.sh`.
 

@@ -29,6 +29,8 @@ def dirs(tmp_path, monkeypatch):
     """Isolated library dirs and a two-theme index."""
     monkeypatch.setenv("MOOD_ENGINE_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("MOOD_ENGINE_STATE_DIR", str(tmp_path / "state"))
+    # Never the user's real hooks.toml: tests must not run their hooks.
+    monkeypatch.setenv("MOOD_ENGINE_CONFIG_DIR", str(tmp_path / "config"))
     themes = tmp_path / "themes"
     (themes / "schemes").mkdir(parents=True)
     (themes / "schemes" / "firebox.json").write_text(json.dumps(FIREBOX))
