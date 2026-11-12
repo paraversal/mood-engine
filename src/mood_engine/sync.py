@@ -27,7 +27,8 @@ State: $STATE/sync.json (STATE as in library.py)
 
 Config: $CONFIG/hooks.toml and templates next to it, CONFIG = $MOOD_ENGINE_CONFIG_DIR
 or $XDG_CONFIG_HOME/mood-engine or ~/.config/mood-engine. Both may be symlinks (e.g.
-stowed from a dotfiles repo). See HOOKS_TEMPLATE for the format.
+stowed from a dotfiles repo). templates/hooks.example.toml documents the format;
+presets.py has the built-in templates and pre-configured hooks.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from . import desktop, library, template, terminal, themes, zed
+from . import desktop, library, presets, template, terminal, themes
 
 IN_HOOK_ENV = "MOOD_ENGINE_IN_HOOK"
 DEFAULT_TIMEOUT = 30
@@ -57,92 +58,6 @@ OUTPUT_TAIL = 2000
 # file at most about every 100 ms and merges faster changes.
 FADE_STEP = 0.11
 _sleep = time.sleep  # tests replace it
-
-HOOKS_TEMPLATE = """\
-# mood-engine hooks: keep other apps in line with the active theme.
-#
-# A hook can render a template into an app's theme file, run a command, or both
-# (render first, then run). Hooks run in order, when what they depend on changes:
-# a different active theme (`mood-engine use`, macOS switching dark/light, another
-# app writing current.json), an edited scheme, or an edit to the hook or its
-# template. `mood-engine hooks --run [NAME]` runs them now.
-#
-# Keys:
-#   name      shown in the menu and in `mood-engine hooks`; must be unique
-#   template  template file, relative to this file's folder (e.g. templates/x.css).
-#             Uses the tinted-theming variables ({{base08-hex}}, {{scheme-name}}, …)
-#             plus the theme's roles ({{role-bg-hex}}, {{role-accent-rgb-r}}, …).
-#             `mood-engine render TEMPLATE` previews it; `--vars` lists variables.
-#   output    where the rendered file goes (~ allowed; relative = this folder).
-#             Written atomically, and only when its content changes.
-#   fade      milliseconds (e.g. 800): when the theme changes, write in-between
-#             themes to `output` about every 110 ms before the final one, for apps
-#             that reload the file by themselves (Zed). Needs `template`.
-#   run       shell command (/bin/sh -c), run after the output is written
-#   timeout   seconds, default 30; the command and everything it started is killed
-#   enabled   default true
-#
-# Commands get these variables:
-#   MOOD_THEME, MOOD_THEME_NAME, MOOD_VARIANT (dark|light), MOOD_PREVIOUS_THEME,
-#   MOOD_APPEARANCE (macOS: dark|light), MOOD_WALLPAPER (path or empty),
-#   MOOD_OUTPUT (the rendered file), MOOD_OUTPUT_CHANGED (1 or 0),
-#   MOOD_ENGINE (this mood-engine executable), THEMES_DIR, THEMES_STATE_DIR
-#
-# Don't call `mood-engine use` or `mood-engine sync` from a hook.
-#
-# Examples (remove the leading # to enable):
-#
-# [[hook]]
-# name = "CSS variables"
-# template = "templates/colors.css"
-# output = "~/.cache/mood-engine/colors.css"
-#
-# Ghostty: set `theme = mood-engine` in its config. The template writes the theme
-# file; `fade` glides the open terminals from the previous theme to this one and
-# makes Ghostty reload its config.
-# [[hook]]
-# name = "Ghostty"
-# template = "templates/ghostty"
-# output = "~/.config/ghostty/themes/mood-engine"
-# run = '"$MOOD_ENGINE" fade'
-# timeout = 10
-#
-# Zed: set "theme": "mood-engine" in settings.json. Zed reloads the file by itself,
-# so there is no command; `fade` steps it from the previous theme to this one.
-# [[hook]]
-# name = "Zed"
-# template = "templates/zed.json"
-# output = "~/.config/zed/themes/mood-engine.json"
-# fade = 800
-#
-# Übersicht: reload one widget (keeps its DOM, so CSS transitions can glide). Its id is
-# the widget's path with / and . turned into -. Avoid the global `refresh`: it
-# reloads the whole page, loses widget state and can leave the webview blank.
-# [[hook]]
-# name = "fs-health widget"
-# run = "osascript -e 'tell application id \\"tracesOf.Uebersicht\\" to reload widget id \\"fs-health-widget-index-jsx\\"'"
-# timeout = 10
-"""
-
-EXAMPLE_TEMPLATE = """\
-/* {{scheme-name}} ({{scheme-variant}}), rendered by mood-engine from templates/colors.css */
-:root {
-  color-scheme: {{scheme-variant}};
-  --theme-bg: #{{role-bg-hex}};
-  --theme-surface: #{{role-surface-hex}};
-  --theme-fg: #{{role-fg-hex}};
-  --theme-fg-muted: #{{role-fg-muted-hex}};
-  --theme-accent: #{{role-accent-hex}};
-  --theme-error: #{{role-error-hex}};
-{{#scheme-is-dark-variant}}
-  --shadow: rgba(0, 0, 0, 0.5);
-{{/scheme-is-dark-variant}}
-{{^scheme-is-dark-variant}}
-  --shadow: rgba({{base03-rgb-r}}, {{base03-rgb-g}}, {{base03-rgb-b}}, 0.25);
-{{/scheme-is-dark-variant}}
-}
-"""
-
 
 class HookConfigError(Exception):
     pass
@@ -174,27 +89,32 @@ def sync_path() -> Path:
     return library.state_dir() / "sync.json"
 
 
-EXAMPLE_TEMPLATES = {"colors.css": EXAMPLE_TEMPLATE, "ghostty": terminal.GHOSTTY_TEMPLATE,
-                     "zed.json": zed.ZED_TEMPLATE}
-
-
-def init_hooks() -> tuple[Path, bool, list[Path]]:
-    """Write the commented hooks.toml and the example templates, each only if it doesn't
-    exist (or is a dangling symlink, which is left alone). Returns (hooks.toml, whether
-    it was written, the templates written)."""
+def init_hooks() -> tuple[Path, bool]:
+    """Write the commented example hooks.toml if there is none (a dangling symlink is
+    left alone). Returns (path, whether it was written). Templates aren't copied: the
+    presets use the built-in ones."""
     p = hooks_path()
-    created = not p.exists() and not p.is_symlink()
-    if created:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(HOOKS_TEMPLATE)
-    written = []
-    for name, text in EXAMPLE_TEMPLATES.items():
-        t = p.parent / "templates" / name
-        if not t.exists() and not t.is_symlink():
-            t.parent.mkdir(parents=True, exist_ok=True)
-            t.write_text(text)
-            written.append(t)
-    return p, created, written
+    if p.exists() or p.is_symlink():
+        return p, False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(presets.example_hooks())
+    return p, True
+
+
+def eject_template(name: str) -> tuple[Path, Path, bool]:
+    """Copy a built-in template (by preset or file name) into the config's templates/
+    folder, for customising. Returns (source, destination, whether it was written);
+    an existing file is never overwritten. Raises KeyError for an unknown name."""
+    ref = presets.PRESETS[name].keys.get("template") if name in presets.PRESETS else name
+    if not ref:
+        raise KeyError(f"preset {name!r} has no template")
+    src = presets.builtin_path(ref)
+    dest = config_dir() / "templates" / src.name
+    if dest.exists() or dest.is_symlink():
+        return src, dest, False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(src.read_text())
+    return src, dest, True
 
 
 def engine_command() -> str:
@@ -209,6 +129,12 @@ def engine_command() -> str:
 def _config_path(value: str, base: Path) -> Path:
     p = Path(value).expanduser()
     return p if p.is_absolute() else base / p
+
+
+def _template_path(value: str, base: Path) -> Path:
+    if value.startswith(presets.BUILTIN_PREFIX):
+        return presets.builtin_path(value)
+    return _config_path(value, base)
 
 
 def load_hooks(path: Path | None = None) -> list[Hook]:
@@ -228,6 +154,13 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
     for i, h in enumerate(raw, 1):
         if not isinstance(h, dict):
             raise HookConfigError(f"{path}: hook {i} is not a table")
+        if "preset" in h:
+            pname = h["preset"]
+            if not isinstance(pname, str) or pname not in presets.PRESETS:
+                raise HookConfigError(f"{path}: hook {i}: unknown preset {pname!r} "
+                                      f"(presets: {', '.join(presets.PRESETS)})")
+            pre = presets.PRESETS[pname]
+            h = {"name": pre.name, **pre.keys, **{k: v for k, v in h.items() if k != "preset"}}
         unknown = set(h) - {"name", "run", "template", "output", "timeout", "enabled", "fade"}
         if unknown:
             raise HookConfigError(f"{path}: hook {i} has unknown key(s) {', '.join(sorted(unknown))}")
@@ -252,8 +185,12 @@ def load_hooks(path: Path | None = None) -> list[Hook]:
         if name in seen:
             raise HookConfigError(f"{path}: two hooks are named {name!r}")
         seen.add(name)
+        try:
+            template_path = _template_path(tpl, path.parent) if tpl else None
+        except KeyError as e:
+            raise HookConfigError(f"{path}: hook {i}: {e.args[0]}") from None
         hooks.append(Hook(name=name, run=run,
-                          template=_config_path(tpl, path.parent) if tpl else None,
+                          template=template_path,
                           output=_config_path(out, path.parent) if out else None,
                           timeout=float(timeout), enabled=h.get("enabled", True) is not False,
                           fade=float(fade) if fade is not None else None))
@@ -267,7 +204,8 @@ def watch_dirs() -> list[str]:
     dirs = {config_dir()}
     files = [hooks_path()]
     with contextlib.suppress(HookConfigError):
-        files += [h.template for h in load_hooks() if h.template]
+        files += [h.template for h in load_hooks()
+                  if h.template and h.template.parent != presets.TEMPLATES_DIR]
     for f in files:
         dirs.add(f.parent)
         with contextlib.suppress(OSError):
@@ -291,6 +229,8 @@ def hook_fingerprint(h: Hook, theme_fp: str) -> str:
     # Keys added later count only when set, so upgrading doesn't rerun every hook.
     spec = {k: v for k, v in asdict(h).items()
             if k not in ("timeout", "enabled") and not (k == "fade" and v is None)}
+    if h.template and h.template.parent == presets.TEMPLATES_DIR:
+        spec["template"] = presets.label(h.template)  # not where mood-engine is installed
     return _sha(theme_fp, spec, tpl)
 
 

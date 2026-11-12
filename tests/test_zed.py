@@ -4,13 +4,14 @@ import json
 
 import pytest
 
-from mood_engine import cli, sync, template, terminal, themes, zed
+from mood_engine import cli, presets, sync, template, terminal, themes
 
 from .test_library import dirs, mac  # noqa: F401  (fixtures)
 
 
 def render(t: themes.Theme) -> dict:
-    return json.loads(template.render(zed.ZED_TEMPLATE, template.context(t)))
+    return json.loads(template.render(presets.builtin_path("zed.json").read_text(),
+                                      template.context(t)))
 
 
 def test_template_renders_a_theme_family(firebox, solarized_light):
@@ -18,6 +19,7 @@ def test_template_renders_a_theme_family(firebox, solarized_light):
     [theme] = fam["themes"]
     st = theme["style"]
     assert theme["name"] == "mood-engine" and theme["appearance"] == "dark"
+    assert len(st) == 142  # every property of Zed's theme schema v0.2.0
     assert st["editor.background"] == "#111111" and st["text.accent"] == "#fe8019"
     assert st["search.match_background"] == "#fe801940" and st["syntax"]["keyword"]["color"] == "#b16286"
     assert render(solarized_light)["themes"][0]["appearance"] == "light"
@@ -93,18 +95,3 @@ def test_fingerprint_of_hooks_without_fade_is_unchanged():
                                                                "template": None, "output": None}, None)
     assert sync.hook_fingerprint(sync.Hook(name="w", run="true", fade=500.0), "fp") != \
         sync.hook_fingerprint(h, "fp")
-
-
-def test_init_writes_zed_template_and_example_hook_parses(dirs, mac, monkeypatch, capsys):
-    monkeypatch.setenv("MOOD_ENGINE_CONFIG_DIR", str(dirs / "fresh"))
-    assert cli.main(["hooks", "--init"]) == 0
-    tpl = dirs / "fresh" / "templates" / "zed.json"
-    assert cli.main(["render", str(tpl)]) == 0
-    capsys.readouterr()
-    body = "\n".join(l[2:] for l in sync.HOOKS_TEMPLATE.splitlines()
-                     if l.startswith("# ") and ("[[hook]]" in l or " = " in l))
-    block = body[body.index('[[hook]]\nname = "Zed"'):].split("[[hook]]")[1]
-    p = dirs / "fresh" / "zed-only.toml"
-    p.write_text("[[hook]]" + block)
-    [h] = sync.load_hooks(p)
-    assert h.fade == 800 and h.output.name == "mood-engine.json" and h.run is None

@@ -1,0 +1,24 @@
+# {{scheme-name}} ({{scheme-variant}}), rendered by mood-engine.
+# Ghostty: theme = mood-engine (this file is ~/.config/ghostty/themes/mood-engine)
+palette = 0=#{{base01-hex}}
+palette = 1=#{{base08-hex}}
+palette = 2=#{{base0B-hex}}
+palette = 3=#{{base0A-hex}}
+palette = 4=#{{base0D-hex}}
+palette = 5=#{{base0E-hex}}
+palette = 6=#{{base0C-hex}}
+palette = 7=#{{base05-hex}}
+palette = 8=#{{base03-hex}}
+palette = 9=#{{base12-hex}}
+palette = 10=#{{base14-hex}}
+palette = 11=#{{base13-hex}}
+palette = 12=#{{base16-hex}}
+palette = 13=#{{base17-hex}}
+palette = 14=#{{base15-hex}}
+palette = 15=#{{base07-hex}}
+background = #{{role-bg-hex}}
+foreground = #{{role-fg-hex}}
+cursor-color = #{{role-accent-hex}}
+cursor-text = #{{role-on-accent-hex}}
+selection-background = #{{role-selection-hex}}
+selection-foreground = #{{role-fg-hex}}

@@ -86,8 +86,8 @@ mood-engine serve  ... [--port 8765] [--no-open]
 mood-engine apply   [THEME] [--next] [--print] [--dry-run]
 mood-engine use     THEME [--appearance]
 mood-engine sync    [--appearance dark|light] [--wallpaper] [--hooks] [--force] [--json]
-mood-engine hooks   [--init] [--run [NAME ...]]
-mood-engine render  [TEMPLATE] [THEME] [-o OUT] [--vars]
+mood-engine hooks   [--init] [--presets] [--eject NAME] [--run [NAME ...]]
+mood-engine render  [TEMPLATE | builtin:NAME] [THEME] [-o OUT] [--vars]
 mood-engine fade    [THEME] [--from THEME] [--app ghostty] [--ms 400] [--no-reload] [--dry-run]
 mood-engine pin     [THEME] [--key SOURCE:ID]
 mood-engine unpin   [THEME]
@@ -218,22 +218,50 @@ line by hooks. A hook renders a template into the app's theme file, runs a comma
 ```
 ~/.config/mood-engine/
   hooks.toml          the hooks, in order
-  templates/          templates the hooks render (paths are relative to hooks.toml)
+  templates/          your own templates (paths are relative to hooks.toml)
 ```
 
 Both can come from a dotfiles repo with GNU stow (e.g. a `mood-engine` package holding
 `.config/mood-engine/hooks.toml` and `.config/mood-engine/templates/…`). The menu bar app
 watches the real files the symlinks point to, so editing them in the repo counts.
-`mood-engine hooks --init` writes a commented `hooks.toml` and the example templates
-`templates/colors.css`, `templates/ghostty` and `templates/zed.json`, each only if it
-doesn't exist yet, so running it again on an existing setup just adds templates that
-are new.
+`mood-engine hooks --init` writes a commented example `hooks.toml` if there is none:
+[`templates/hooks.example.toml`](src/mood_engine/templates/hooks.example.toml), which
+documents every key.
+
+**Presets** are ready-made hooks. Each names a built-in template, where its output
+goes and what to run; any key next to `preset` overrides the preset's:
 
 ```toml
 [[hook]]
-name = "CSS variables"
-template = "templates/colors.css"           # relative to hooks.toml
-output = "~/.cache/mood-engine/colors.css"  # written atomically, only when it changes
+preset = "ghostty"   # then `theme = mood-engine` in Ghostty's config
+
+[[hook]]
+preset = "zed"       # then "theme": "mood-engine" in Zed's settings
+fade = 1200          # slower than the preset's 800 ms
+```
+
+| Preset    | Template              | Output                                   | Then                      |
+|-----------|-----------------------|------------------------------------------|---------------------------|
+| `ghostty` | `builtin:ghostty`     | `~/.config/ghostty/themes/mood-engine`   | runs `mood-engine fade`   |
+| `zed`     | `builtin:zed.json`    | `~/.config/zed/themes/mood-engine.json`  | `fade = 800`              |
+| `css`     | `builtin:colors.css`  | `~/.cache/mood-engine/colors.css`        | –                         |
+
+`mood-engine hooks --presets` prints each preset's keys and the line the app's own
+config needs. The built-in templates live in
+[`src/mood_engine/templates/`](src/mood_engine/templates) and are used where they are,
+not copied: when mood-engine improves one, the next sync re-renders it (the template's
+text is part of the hook's fingerprint). Any hook can use one with
+`template = "builtin:NAME"`. To customise one, `mood-engine hooks --eject zed` (or
+`--eject builtin:zed.json`) copies it into `templates/` and prints the `template = …`
+line to put in the hook instead; it never overwrites a file.
+
+Your own hooks name every key themselves:
+
+```toml
+[[hook]]
+name = "Alacritty"
+template = "templates/alacritty.toml"       # relative to hooks.toml
+output = "~/.config/alacritty/theme.toml"   # written atomically, only when it changes
 # fade = 800         # ms: step the file through in-between themes first (see Zed)
 
 [[hook]]
@@ -257,8 +285,8 @@ and so on. Sections work on `scheme-is-dark-variant` / `scheme-is-light-variant`
 writes a broken theme file; the hook fails and the old output stays.
 
 ```bash
-mood-engine render templates/colors.css             # preview with the active theme
-mood-engine render templates/colors.css solarized-light -o /tmp/x.css
+mood-engine render templates/alacritty.toml        # preview with the active theme
+mood-engine render builtin:zed.json solarized-light -o /tmp/x.json
 mood-engine render --vars                           # every variable and its value
 ```
 
@@ -278,16 +306,13 @@ not call `mood-engine use` or `sync` (such calls are skipped).
 ### Ghostty, with a fade between themes
 
 Ghostty reads its colours from a theme file and reloads its config on `SIGUSR2`, so one
-hook keeps it in line. `mood-engine hooks --init` writes the template
-(`templates/ghostty`); then add the hook and point Ghostty at the theme:
+hook keeps it in line: add the preset and point Ghostty at the theme.
 
 ```toml
 [[hook]]
-name = "Ghostty"
-template = "templates/ghostty"
-output = "~/.config/ghostty/themes/mood-engine"
-run = '"$MOOD_ENGINE" fade'
-timeout = 10
+preset = "ghostty"
+# stands for: template = "builtin:ghostty", output = "~/.config/ghostty/themes/mood-engine",
+#             run = '"$MOOD_ENGINE" fade', timeout = 10
 ```
 
 ```
@@ -336,15 +361,14 @@ Caveats:
 ### Zed, with a stepped fade
 
 Zed reads theme families from `~/.config/zed/themes` and re-reads a file there when it
-changes, so the hook needs no command. `mood-engine hooks --init` writes the template
-(`templates/zed.json`); then add the hook and select the theme in Zed's settings:
+changes, so the hook needs no command: add the preset and select the theme in Zed's
+settings.
 
 ```toml
 [[hook]]
-name = "Zed"
-template = "templates/zed.json"
-output = "~/.config/zed/themes/mood-engine.json"
-fade = 800
+preset = "zed"
+# stands for: template = "builtin:zed.json",
+#             output = "~/.config/zed/themes/mood-engine.json", fade = 800
 ```
 
 ```jsonc
@@ -524,19 +548,21 @@ cover:
   symlinked outputs; per-hook fingerprints (edited scheme, edited template, new or
   re-enabled hook); config validation; a stowed (symlinked) config and its watch paths;
   `render` and `hooks --run NAME`
-- Ghostty: the template renders the same colours the fade uses (and its example hook
-  parses), finding terminals through a root-owned `login`, and the fade on a real
+- Ghostty: the template renders the same colours the fade uses, finding terminals through a root-owned `login`, and the fade on a real
   pseudo-terminal: old colours pinned before the reload, every colour ending on the new
   theme, the pins dropped last; reload only without a previous theme; `--no-reload`;
-  unopenable ttys; `fade` reading the hook environment; `MOOD_ENGINE` in hooks;
-  `hooks --init` adding a missing template without touching existing files. No test
-  signals a real process or runs your real hooks.
+  unopenable ttys; `fade` reading the hook environment; `MOOD_ENGINE` in hooks. No
+  test signals a real process or runs your real hooks.
 - Zed: the template renders a theme family with the theme's colours and Ghostty's
   ANSI colours; blending (end points, OKLab midpoint, variant flip); a hook's `fade`
   writing eased frames from the previous theme before the final file, and skipping
   them without a previous theme or when the file is already current; `fade`
-  validation; hooks without `fade` keep their fingerprint; `hooks --init` and the
-  example hook.
+  validation; hooks without `fade` keep their fingerprint.
+- Presets: every preset's built-in template renders; every example hook in
+  `hooks.example.toml` parses once uncommented; presets fill in and keys override
+  them; unknown presets and built-ins are errors; a built-in template's fingerprint
+  names it rather than the install path; `hooks --presets`, `--eject` (never
+  overwriting), `--init` (only when missing) and `render builtin:…`.
 
 The menu bar app has no automated tests; build it with `./macos/build.sh`.
 

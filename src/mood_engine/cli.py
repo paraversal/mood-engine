@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import desktop, gallery, library, pipeline, selection, terminal, themes
+from . import desktop, gallery, library, pipeline, presets, selection, terminal, themes
 from . import sync as syncmod
 from . import template as tplmod
 from .sources import ALL_SOURCES
@@ -165,10 +165,25 @@ def cmd_sync(a) -> int:
 
 def cmd_hooks(a) -> int:
     if a.init:
-        path, created, templates = syncmod.init_hooks()
+        path, created = syncmod.init_hooks()
         print(f"{'wrote' if created else 'already exists:'} {path}")
-        for t in templates:
-            print(f"wrote {t}")
+        if not created:
+            print("`mood-engine hooks --presets` lists ready-made hooks to add to it")
+        return 0
+    if a.presets:
+        return _print_presets()
+    if a.eject:
+        try:
+            src, dest, written = syncmod.eject_template(a.eject)
+        except KeyError as e:
+            print(f"error: {e.args[0]} (presets: {', '.join(presets.PRESETS)})", file=sys.stderr)
+            return 2
+        if not written:
+            print(f"already exists, not overwritten: {dest}")
+            return 1
+        rel = dest.relative_to(syncmod.config_dir())
+        print(f"wrote {dest}\nto use it, set in that hook:  template = \"{rel}\"  "
+              f"(instead of \"{presets.label(src)}\")")
         return 0
     if a.run is not None:
         if a.run:
@@ -193,7 +208,7 @@ def cmd_hooks(a) -> int:
         print(f"- {h.name}{off}")
         if h.template:
             fade = f"  (fade {h.fade:g} ms)" if h.fade else ""
-            print(f"    render {h.template} → {h.output}{fade}")
+            print(f"    render {presets.label(h.template)} → {h.output}{fade}")
         if h.run:
             print(f"    run    {h.run}")
     if path.exists() and not hooks:
@@ -203,6 +218,26 @@ def cmd_hooks(a) -> int:
         print(f"last run {last['hooks_at']} for {last.get('theme')}:")
         for h in last.get("hooks", []):
             print(f"  {'ok  ' if h['ok'] else 'FAIL'} {h['name']}  ({h.get('at', '')})")
+    return 0
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, str):
+        return f"'{v}'" if '"' in v and "'" not in v else json.dumps(v, ensure_ascii=False)
+    return json.dumps(v)
+
+
+def _print_presets() -> int:
+    for key, p in presets.PRESETS.items():
+        print(f"{key}: {p.description}")
+        print(f'  preset = "{key}" stands for:')
+        print(f"    name = {_toml_value(p.name)}")
+        for k, v in p.keys.items():
+            print(f"    {k} = {_toml_value(v)}")
+        print(f"  in the app's config: {p.app_config}\n")
+    print("built-in templates: " + ", ".join(presets.BUILTIN_PREFIX + n
+                                             for n in presets.builtin_names()))
+    print("`mood-engine hooks --eject NAME` copies one into your config to customise it")
     return 0
 
 
@@ -220,7 +255,12 @@ def cmd_render(a) -> int:
         print("error: give a TEMPLATE file (or --vars)", file=sys.stderr)
         return 2
     try:
-        text = tplmod.render(Path(a.template).expanduser().read_text(), ctx)
+        src = (presets.builtin_path(a.template) if a.template.startswith(presets.BUILTIN_PREFIX)
+               else Path(a.template).expanduser())
+        text = tplmod.render(src.read_text(), ctx)
+    except KeyError as e:
+        print(f"error: {e.args[0]}", file=sys.stderr)
+        return 2
     except (OSError, UnicodeDecodeError, tplmod.TemplateError) as e:
         print(f"error: {a.template}: {e}", file=sys.stderr)
         return 1
@@ -469,14 +509,19 @@ def main(argv: list[str] | None = None) -> int:
 
     hk = sub.add_parser("hooks", help="list the hooks run after a theme change")
     hk.add_argument("--init", action="store_true",
-                    help="write a commented hooks.toml and the example templates "
-                         "(only files that don't exist yet)")
+                    help="write a commented example hooks.toml (if there is none)")
+    hk.add_argument("--presets", action="store_true",
+                    help="list the ready-made hooks (`preset = NAME`) and built-in templates")
+    hk.add_argument("--eject", metavar="NAME",
+                    help="copy a preset's built-in template (or builtin:FILE) into your "
+                         "config's templates/ to customise it")
     hk.add_argument("--run", nargs="*", metavar="NAME",
                     help="run them now for the active theme (all, or the named ones)")
     hk.set_defaults(func=cmd_hooks)
 
     rd = sub.add_parser("render", help="preview a hook template with a theme")
-    rd.add_argument("template", nargs="?", metavar="TEMPLATE", help="template file")
+    rd.add_argument("template", nargs="?", metavar="TEMPLATE",
+                    help="template file, or builtin:NAME (e.g. builtin:zed.json)")
     rd.add_argument("theme_pos", nargs="?", metavar="THEME",
                     help="theme id, or 'system' (the default: the active theme)")
     rd.add_argument("-t", "--theme", default="system", help="same as THEME")

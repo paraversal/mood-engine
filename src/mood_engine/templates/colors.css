@@ -1,0 +1,16 @@
+/* {{scheme-name}} ({{scheme-variant}}), rendered by mood-engine from templates/colors.css */
+:root {
+  color-scheme: {{scheme-variant}};
+  --theme-bg: #{{role-bg-hex}};
+  --theme-surface: #{{role-surface-hex}};
+  --theme-fg: #{{role-fg-hex}};
+  --theme-fg-muted: #{{role-fg-muted-hex}};
+  --theme-accent: #{{role-accent-hex}};
+  --theme-error: #{{role-error-hex}};
+{{#scheme-is-dark-variant}}
+  --shadow: rgba(0, 0, 0, 0.5);
+{{/scheme-is-dark-variant}}
+{{^scheme-is-dark-variant}}
+  --shadow: rgba({{base03-rgb-r}}, {{base03-rgb-g}}, {{base03-rgb-b}}, 0.25);
+{{/scheme-is-dark-variant}}
+}

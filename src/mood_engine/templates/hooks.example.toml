@@ -1,0 +1,73 @@
+# mood-engine hooks: keep other apps in line with the active theme.
+#
+# A hook can render a template into an app's theme file, run a command, or both
+# (render first, then run). Hooks run in order, when what they depend on changes:
+# a different active theme (`mood-engine use`, macOS switching dark/light, another
+# app writing current.json), an edited scheme, or an edit to the hook or its
+# template. `mood-engine hooks --run [NAME]` runs them now.
+#
+# ── Presets ──────────────────────────────────────────────────────────────────
+#
+# A preset is a ready-made hook; `mood-engine hooks --presets` lists them and what
+# each app's own config needs. Any key next to `preset` overrides the preset's.
+# Remove the leading # to enable one.
+#
+# Ghostty: also set `theme = mood-engine` in ~/.config/ghostty/config. Open terminals
+# glide into the new theme, then Ghostty reloads its config.
+# [[hook]]
+# preset = "ghostty"
+#
+# Zed: also set "theme": "mood-engine" in ~/.config/zed/settings.json. Zed reloads
+# the file by itself; the switch steps through in-between themes over 800 ms.
+# [[hook]]
+# preset = "zed"
+# fade = 1200          # e.g. a slower fade
+#
+# CSS custom properties (--theme-bg, --theme-accent, …) for web pages and widgets.
+# [[hook]]
+# preset = "css"
+# output = "~/somewhere/else/colors.css"
+#
+# ── Your own hooks ───────────────────────────────────────────────────────────
+#
+# Keys:
+#   name      shown in the menu and in `mood-engine hooks`; must be unique
+#             (a preset's default: Ghostty, Zed, CSS variables)
+#   preset    start from a preset (see above)
+#   template  template file, relative to this file's folder (e.g. templates/x.css),
+#             or a built-in one: "builtin:ghostty", "builtin:zed.json",
+#             "builtin:colors.css". Built-in templates update with mood-engine;
+#             `mood-engine hooks --eject zed` copies one here to customise it.
+#             Templates use the tinted-theming variables ({{base08-hex}},
+#             {{scheme-name}}, …) plus the theme's roles ({{role-bg-hex}}, …).
+#             `mood-engine render TEMPLATE` previews one; `--vars` lists variables.
+#   output    where the rendered file goes (~ allowed; relative = this folder).
+#             Written atomically, and only when its content changes.
+#   fade      milliseconds (e.g. 800): when the theme changes, write in-between
+#             themes to `output` about every 110 ms before the final one, for apps
+#             that reload the file by themselves. Needs `template`.
+#   run       shell command (/bin/sh -c), run after the output is written
+#   timeout   seconds, default 30; the command and everything it started is killed
+#   enabled   default true
+#
+# Commands get these variables:
+#   MOOD_THEME, MOOD_THEME_NAME, MOOD_VARIANT (dark|light), MOOD_PREVIOUS_THEME,
+#   MOOD_APPEARANCE (macOS: dark|light), MOOD_WALLPAPER (path or empty),
+#   MOOD_OUTPUT (the rendered file), MOOD_OUTPUT_CHANGED (1 or 0),
+#   MOOD_ENGINE (this mood-engine executable), THEMES_DIR, THEMES_STATE_DIR
+#
+# Don't call `mood-engine use` or `mood-engine sync` from a hook.
+#
+# Your own template:
+# [[hook]]
+# name = "Alacritty"
+# template = "templates/alacritty.toml"
+# output = "~/.config/alacritty/theme.toml"
+#
+# Übersicht: reload one widget (keeps its DOM, so CSS transitions can glide). Its id is
+# the widget's path with / and . turned into -. Avoid the global `refresh`: it
+# reloads the whole page, loses widget state and can leave the webview blank.
+# [[hook]]
+# name = "my widget"
+# run = "osascript -e 'tell application id \"tracesOf.Uebersicht\" to reload widget id \"my-widget-index-jsx\"'"
+# timeout = 10

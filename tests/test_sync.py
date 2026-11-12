@@ -320,10 +320,10 @@ def test_render_cli(dirs, mac, cfg, capsys, tmp_path):
     assert (tmp_path / "x.css").read_text().startswith("bg: #111111")
 
 
-def test_init_writes_example_template_that_renders(dirs, mac, monkeypatch, capsys):
+def test_init_writes_example_config_and_builtin_css_renders(dirs, mac, monkeypatch, capsys):
     monkeypatch.setenv("MOOD_ENGINE_CONFIG_DIR", str(dirs / "fresh"))
     assert cli.main(["hooks", "--init"]) == 0
-    example = dirs / "fresh" / "templates" / "colors.css"
-    assert cli.main(["render", str(example)]) == 0
+    assert (dirs / "fresh" / "hooks.toml").exists() and not (dirs / "fresh" / "templates").exists()
+    assert cli.main(["render", "builtin:colors.css"]) == 0
     out = capsys.readouterr().out
     assert "--theme-bg: #111111;" in out and "rgba(0, 0, 0, 0.5)" in out and "{{" not in out

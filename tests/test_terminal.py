@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from mood_engine import cli, sync, template, terminal
+from mood_engine import cli, presets, sync, template, terminal
 
 from .test_library import dirs, mac  # noqa: F401  (fixtures)
 
@@ -51,7 +51,7 @@ def sequences(data: bytes) -> list[tuple[str, str]]:
 
 def test_template_renders_the_same_colours_the_fade_uses(firebox, solarized_light):
     for t in (firebox, solarized_light):
-        text = template.render(terminal.GHOSTTY_TEMPLATE, template.context(t))
+        text = template.render(presets.builtin_path("ghostty").read_text(), template.context(t))
         conf = dict(l.split(" = ", 1) for l in text.splitlines() if l and not l.startswith("#")
                     and not l.startswith("palette"))
         pal = dict(l.split(" = ", 1)[1].split("=") for l in text.splitlines() if l.startswith("palette"))
@@ -175,28 +175,3 @@ def test_hook_gets_mood_engine_and_previous_theme(dirs, mac, monkeypatch):
     first, second = log.read_text().splitlines()
     engine = first.split("|")[0]
     assert engine.endswith("mood-engine") and second == f"{engine}|firebox"
-
-
-def test_init_adds_missing_ghostty_template_to_existing_config(dirs, mac, monkeypatch, capsys):
-    monkeypatch.setenv("MOOD_ENGINE_CONFIG_DIR", str(dirs / "cfg"))
-    (dirs / "cfg").mkdir()
-    sync.hooks_path().write_text("# mine\n")
-    assert cli.main(["hooks", "--init"]) == 0
-    out = capsys.readouterr().out
-    assert "already exists" in out and "templates/ghostty" in out
-    assert sync.hooks_path().read_text() == "# mine\n"
-    tpl = dirs / "cfg" / "templates" / "ghostty"
-    tpl.write_text("custom")
-    assert cli.main(["hooks", "--init"]) == 0 and tpl.read_text() == "custom"
-    assert "wrote" not in capsys.readouterr().out
-    assert cli.main(["render", str(dirs / "cfg" / "templates" / "colors.css")]) == 0
-
-
-def test_ghostty_example_hook_in_template_is_valid(dirs, monkeypatch):
-    body = "\n".join(l[2:] for l in sync.HOOKS_TEMPLATE.splitlines()
-                     if l.startswith("# ") and ("[[hook]]" in l or " = " in l))
-    ghostty = body[body.index('[[hook]]\nname = "Ghostty"'):].split("[[hook]]")[1]
-    p = dirs / "hooks.toml"
-    p.write_text("[[hook]]" + ghostty)
-    [h] = sync.load_hooks(p)
-    assert h.name == "Ghostty" and h.run == '"$MOOD_ENGINE" fade' and h.template.name == "ghostty"

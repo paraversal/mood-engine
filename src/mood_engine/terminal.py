@@ -11,7 +11,8 @@ the terminal could change its colours:
   4. drop the pins (OSC 104/110/111/112), which leaves the reloaded config's colours.
 
 The in-between colours come from `colours()`; where the app's theme file (rendered from
-GHOSTTY_TEMPLATE, or the user's own template) differs, step 4 snaps to the file's colours.
+the built-in templates/ghostty, or the user's own template) differs, step 4 snaps to
+the file's colours.
 
 Only colour *set* sequences are written. A query's reply would arrive as input to
 whatever runs in the terminal, e.g. the shell.
@@ -37,36 +38,9 @@ from .themes import Theme
 
 # Base24 slots for ANSI colours 0-15. Black is base01 rather than the background, so
 # "black" cells stay visible on dark themes; the bright row uses base24's bright slots.
+# templates/ghostty and templates/zed.json use the same slots; the tests check that.
 ANSI_SLOTS = ("base01", "base08", "base0B", "base0A", "base0D", "base0E", "base0C", "base05",
               "base03", "base12", "base14", "base13", "base16", "base17", "base15", "base07")
-
-# Kept in step with ANSI_SLOTS and colours(); the tests check that it renders the same.
-GHOSTTY_TEMPLATE = """\
-# {{scheme-name}} ({{scheme-variant}}), rendered by mood-engine.
-# Ghostty: theme = mood-engine (this file is ~/.config/ghostty/themes/mood-engine)
-palette = 0=#{{base01-hex}}
-palette = 1=#{{base08-hex}}
-palette = 2=#{{base0B-hex}}
-palette = 3=#{{base0A-hex}}
-palette = 4=#{{base0D-hex}}
-palette = 5=#{{base0E-hex}}
-palette = 6=#{{base0C-hex}}
-palette = 7=#{{base05-hex}}
-palette = 8=#{{base03-hex}}
-palette = 9=#{{base12-hex}}
-palette = 10=#{{base14-hex}}
-palette = 11=#{{base13-hex}}
-palette = 12=#{{base16-hex}}
-palette = 13=#{{base17-hex}}
-palette = 14=#{{base15-hex}}
-palette = 15=#{{base07-hex}}
-background = #{{role-bg-hex}}
-foreground = #{{role-fg-hex}}
-cursor-color = #{{role-accent-hex}}
-cursor-text = #{{role-on-accent-hex}}
-selection-background = #{{role-selection-hex}}
-selection-foreground = #{{role-fg-hex}}
-"""
 
 # How to make an app re-read its config. Ghostty reloads on SIGUSR2 (macOS and Linux).
 RELOAD_SIGNALS = {"ghostty": signal.SIGUSR2}

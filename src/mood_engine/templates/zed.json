@@ -1,0 +1,395 @@
+{
+  "$schema": "https://zed.dev/schema/themes/v0.2.0.json",
+  "name": "mood-engine",
+  "author": "mood-engine ({{scheme-name}})",
+  "themes": [
+    {
+      "name": "mood-engine",
+      "appearance": "{{scheme-variant}}",
+      "style": {
+        "background.appearance": "opaque",
+        "background": "#{{role-surface-hex}}",
+        "surface.background": "#{{role-surface-hex}}",
+        "elevated_surface.background": "#{{role-surface-raised-hex}}",
+        "panel.background": "#{{role-surface-hex}}",
+        "title_bar.background": "#{{role-surface-hex}}",
+        "title_bar.inactive_background": "#{{role-bg-inset-hex}}",
+        "status_bar.background": "#{{role-surface-hex}}",
+        "tab_bar.background": "#{{role-surface-hex}}",
+        "tab.inactive_background": "#{{role-surface-hex}}",
+        "tab.active_background": "#{{role-bg-hex}}",
+        "toolbar.background": "#{{role-bg-hex}}",
+        "editor.background": "#{{role-bg-hex}}",
+        "editor.gutter.background": "#{{role-bg-hex}}",
+        "editor.subheader.background": "#{{role-surface-hex}}",
+        "editor.foreground": "#{{role-fg-hex}}",
+        "editor.line_number": "#{{role-fg-subtle-hex}}",
+        "editor.active_line_number": "#{{role-fg-hex}}",
+        "editor.active_line.background": "#{{role-surface-hex}}bf",
+        "editor.highlighted_line.background": "#{{role-surface-hex}}",
+        "editor.indent_guide": "#{{role-surface-raised-hex}}",
+        "editor.indent_guide_active": "#{{role-fg-subtle-hex}}",
+        "editor.invisible": "#{{role-fg-subtle-hex}}",
+        "editor.wrap_guide": "#{{role-surface-raised-hex}}80",
+        "editor.active_wrap_guide": "#{{role-fg-subtle-hex}}80",
+        "editor.document_highlight.read_background": "#{{role-accent-hex}}1a",
+        "editor.document_highlight.write_background": "#{{role-accent-hex}}33",
+        "editor.document_highlight.bracket_background": "#{{role-accent-hex}}26",
+        "search.match_background": "#{{role-accent-hex}}40",
+        "drop_target.background": "#{{role-accent-hex}}26",
+        "border": "#{{role-border-hex}}",
+        "border.variant": "#{{role-surface-raised-hex}}",
+        "border.focused": "#{{role-accent-hex}}",
+        "border.selected": "#{{role-accent-hex}}",
+        "border.transparent": "#00000000",
+        "border.disabled": "#{{role-fg-subtle-hex}}80",
+        "pane.focused_border": "#{{role-accent-hex}}",
+        "pane_group.border": "#{{role-border-hex}}",
+        "panel.focused_border": "#{{role-accent-hex}}",
+        "panel.indent_guide": "#{{role-surface-raised-hex}}",
+        "panel.indent_guide_active": "#{{role-fg-subtle-hex}}",
+        "panel.indent_guide_hover": "#{{role-fg-muted-hex}}",
+        "element.background": "#{{role-surface-hex}}",
+        "element.hover": "#{{role-surface-raised-hex}}",
+        "element.active": "#{{role-selection-hex}}",
+        "element.selected": "#{{role-selection-hex}}",
+        "element.disabled": "#{{role-surface-hex}}",
+        "ghost_element.background": "#00000000",
+        "ghost_element.hover": "#{{role-surface-raised-hex}}",
+        "ghost_element.active": "#{{role-selection-hex}}",
+        "ghost_element.selected": "#{{role-selection-hex}}",
+        "ghost_element.disabled": "#00000000",
+        "text": "#{{role-fg-hex}}",
+        "text.muted": "#{{role-fg-muted-hex}}",
+        "text.placeholder": "#{{role-fg-subtle-hex}}",
+        "text.disabled": "#{{role-fg-subtle-hex}}",
+        "text.accent": "#{{role-accent-hex}}",
+        "icon": "#{{role-fg-hex}}",
+        "icon.muted": "#{{role-fg-muted-hex}}",
+        "icon.placeholder": "#{{role-fg-subtle-hex}}",
+        "icon.disabled": "#{{role-fg-subtle-hex}}",
+        "icon.accent": "#{{role-accent-hex}}",
+        "link_text.hover": "#{{role-link-hex}}",
+        "scrollbar.thumb.background": "#{{role-fg-subtle-hex}}4c",
+        "scrollbar.thumb.hover_background": "#{{role-fg-subtle-hex}}80",
+        "scrollbar.thumb.border": "#00000000",
+        "scrollbar.track.background": "#00000000",
+        "scrollbar.track.border": "#00000000",
+        "error": "#{{role-error-hex}}",
+        "error.background": "#{{role-error-hex}}1a",
+        "error.border": "#{{role-error-hex}}66",
+        "warning": "#{{role-warning-hex}}",
+        "warning.background": "#{{role-warning-hex}}1a",
+        "warning.border": "#{{role-warning-hex}}66",
+        "success": "#{{role-success-hex}}",
+        "success.background": "#{{role-success-hex}}1a",
+        "success.border": "#{{role-success-hex}}66",
+        "info": "#{{role-info-hex}}",
+        "info.background": "#{{role-info-hex}}1a",
+        "info.border": "#{{role-info-hex}}66",
+        "hint": "#{{role-fg-subtle-hex}}",
+        "hint.background": "#{{role-fg-subtle-hex}}1a",
+        "hint.border": "#{{role-fg-subtle-hex}}66",
+        "created": "#{{role-success-hex}}",
+        "created.background": "#{{role-success-hex}}1a",
+        "created.border": "#{{role-success-hex}}66",
+        "deleted": "#{{role-error-hex}}",
+        "deleted.background": "#{{role-error-hex}}1a",
+        "deleted.border": "#{{role-error-hex}}66",
+        "modified": "#{{role-warning-hex}}",
+        "modified.background": "#{{role-warning-hex}}1a",
+        "modified.border": "#{{role-warning-hex}}66",
+        "renamed": "#{{role-info-hex}}",
+        "renamed.background": "#{{role-info-hex}}1a",
+        "renamed.border": "#{{role-info-hex}}66",
+        "conflict": "#{{role-warning-hex}}",
+        "conflict.background": "#{{role-warning-hex}}1a",
+        "conflict.border": "#{{role-warning-hex}}66",
+        "hidden": "#{{role-fg-subtle-hex}}",
+        "hidden.background": "#{{role-fg-subtle-hex}}1a",
+        "hidden.border": "#{{role-fg-subtle-hex}}66",
+        "ignored": "#{{role-fg-subtle-hex}}",
+        "ignored.background": "#{{role-fg-subtle-hex}}1a",
+        "ignored.border": "#{{role-fg-subtle-hex}}66",
+        "predictive": "#{{role-fg-subtle-hex}}",
+        "predictive.background": "#{{role-fg-subtle-hex}}1a",
+        "predictive.border": "#{{role-fg-subtle-hex}}66",
+        "unreachable": "#{{role-fg-muted-hex}}",
+        "unreachable.background": "#{{role-fg-muted-hex}}1a",
+        "unreachable.border": "#{{role-fg-muted-hex}}66",
+        "terminal.background": "#{{role-bg-hex}}",
+        "terminal.ansi.background": "#{{role-bg-hex}}",
+        "terminal.foreground": "#{{role-fg-hex}}",
+        "terminal.bright_foreground": "#{{base07-hex}}",
+        "terminal.dim_foreground": "#{{role-fg-muted-hex}}",
+        "terminal.ansi.black": "#{{base01-hex}}",
+        "terminal.ansi.bright_black": "#{{base03-hex}}",
+        "terminal.ansi.dim_black": "#{{base01-hex}}b3",
+        "terminal.ansi.red": "#{{base08-hex}}",
+        "terminal.ansi.bright_red": "#{{base12-hex}}",
+        "terminal.ansi.dim_red": "#{{base08-hex}}b3",
+        "terminal.ansi.green": "#{{base0B-hex}}",
+        "terminal.ansi.bright_green": "#{{base14-hex}}",
+        "terminal.ansi.dim_green": "#{{base0B-hex}}b3",
+        "terminal.ansi.yellow": "#{{base0A-hex}}",
+        "terminal.ansi.bright_yellow": "#{{base13-hex}}",
+        "terminal.ansi.dim_yellow": "#{{base0A-hex}}b3",
+        "terminal.ansi.blue": "#{{base0D-hex}}",
+        "terminal.ansi.bright_blue": "#{{base16-hex}}",
+        "terminal.ansi.dim_blue": "#{{base0D-hex}}b3",
+        "terminal.ansi.magenta": "#{{base0E-hex}}",
+        "terminal.ansi.bright_magenta": "#{{base17-hex}}",
+        "terminal.ansi.dim_magenta": "#{{base0E-hex}}b3",
+        "terminal.ansi.cyan": "#{{base0C-hex}}",
+        "terminal.ansi.bright_cyan": "#{{base15-hex}}",
+        "terminal.ansi.dim_cyan": "#{{base0C-hex}}b3",
+        "terminal.ansi.white": "#{{base05-hex}}",
+        "terminal.ansi.bright_white": "#{{base07-hex}}",
+        "terminal.ansi.dim_white": "#{{base05-hex}}b3",
+        "accents": [
+          "#{{base0D-hex}}",
+          "#{{base0E-hex}}",
+          "#{{base0C-hex}}",
+          "#{{base0B-hex}}",
+          "#{{base0A-hex}}",
+          "#{{base09-hex}}",
+          "#{{base08-hex}}"
+        ],
+        "players": [
+          {
+            "cursor": "#{{role-accent-hex}}",
+            "background": "#{{role-accent-hex}}",
+            "selection": "#{{role-selection-hex}}"
+          },
+          {
+            "cursor": "#{{base08-hex}}",
+            "background": "#{{base08-hex}}",
+            "selection": "#{{base08-hex}}3d"
+          },
+          {
+            "cursor": "#{{base0B-hex}}",
+            "background": "#{{base0B-hex}}",
+            "selection": "#{{base0B-hex}}3d"
+          },
+          {
+            "cursor": "#{{base0E-hex}}",
+            "background": "#{{base0E-hex}}",
+            "selection": "#{{base0E-hex}}3d"
+          },
+          {
+            "cursor": "#{{base0A-hex}}",
+            "background": "#{{base0A-hex}}",
+            "selection": "#{{base0A-hex}}3d"
+          },
+          {
+            "cursor": "#{{base0C-hex}}",
+            "background": "#{{base0C-hex}}",
+            "selection": "#{{base0C-hex}}3d"
+          },
+          {
+            "cursor": "#{{base09-hex}}",
+            "background": "#{{base09-hex}}",
+            "selection": "#{{base09-hex}}3d"
+          },
+          {
+            "cursor": "#{{base0F-hex}}",
+            "background": "#{{base0F-hex}}",
+            "selection": "#{{base0F-hex}}3d"
+          }
+        ],
+        "syntax": {
+          "comment": {
+            "color": "#{{base03-hex}}",
+            "font_style": "italic",
+            "font_weight": null
+          },
+          "comment.doc": {
+            "color": "#{{base04-hex}}",
+            "font_style": "italic",
+            "font_weight": null
+          },
+          "keyword": {
+            "color": "#{{base0E-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "operator": {
+            "color": "#{{base0C-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "preproc": {
+            "color": "#{{base0A-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "function": {
+            "color": "#{{base0D-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "constructor": {
+            "color": "#{{base0D-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "title": {
+            "color": "#{{base0D-hex}}",
+            "font_style": null,
+            "font_weight": 700
+          },
+          "string": {
+            "color": "#{{base0B-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "string.escape": {
+            "color": "#{{base0C-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "string.regex": {
+            "color": "#{{base0C-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "string.special": {
+            "color": "#{{base0F-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "string.special.symbol": {
+            "color": "#{{base0F-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "number": {
+            "color": "#{{base09-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "boolean": {
+            "color": "#{{base09-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "constant": {
+            "color": "#{{base09-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "type": {
+            "color": "#{{base0A-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "enum": {
+            "color": "#{{base0A-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "variant": {
+            "color": "#{{base0A-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "attribute": {
+            "color": "#{{base0A-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "variable": {
+            "color": "#{{role-fg-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "variable.special": {
+            "color": "#{{base08-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "property": {
+            "color": "#{{base08-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "tag": {
+            "color": "#{{base08-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "label": {
+            "color": "#{{base0D-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "punctuation": {
+            "color": "#{{role-fg-muted-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "punctuation.bracket": {
+            "color": "#{{role-fg-muted-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "punctuation.delimiter": {
+            "color": "#{{role-fg-muted-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "punctuation.list_marker": {
+            "color": "#{{base08-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "punctuation.special": {
+            "color": "#{{base0F-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "embedded": {
+            "color": "#{{base0F-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "text.literal": {
+            "color": "#{{base0B-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "link_text": {
+            "color": "#{{base0D-hex}}",
+            "font_style": "italic",
+            "font_weight": null
+          },
+          "link_uri": {
+            "color": "#{{base0C-hex}}",
+            "font_style": null,
+            "font_weight": null
+          },
+          "emphasis": {
+            "color": "#{{role-fg-hex}}",
+            "font_style": "italic",
+            "font_weight": null
+          },
+          "emphasis.strong": {
+            "color": "#{{base09-hex}}",
+            "font_style": null,
+            "font_weight": 700
+          },
+          "predictive": {
+            "color": "#{{role-fg-subtle-hex}}",
+            "font_style": "italic",
+            "font_weight": null
+          },
+          "hint": {
+            "color": "#{{role-fg-subtle-hex}}",
+            "font_style": null,
+            "font_weight": null
+          }
+        }
+      }
+    }
+  ]
+}
