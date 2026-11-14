@@ -126,3 +126,7 @@ The tests use synthetic images and embedded schemes, so they need neither
   to appear somewhere, so the ranking does the real work.
 - The menu bar app is ad-hoc signed, so macOS may ask for Automation permission again
   after a rebuild.
+
+## License
+
+GPL-3.0-only. See [LICENSE](LICENSE).

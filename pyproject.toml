@@ -3,6 +3,8 @@ name = "mood-engine"
 version = "0.1.0"
 description = "Base24 theme engine for macOS: app theming, wallpaper and live hooks"
 readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26", "pillow>=10"]
 
