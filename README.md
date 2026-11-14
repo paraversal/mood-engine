@@ -1,650 +1,152 @@
 # mood-engine
 
-Suggests **existing** wallpapers that match a Base24 theme from your global theme
-index (`~/.config/themes`). It asks wallpaper and photo APIs for candidates using each
-API's colour filter, scores every thumbnail in OKLab against the theme, and shows a
-ranked gallery styled in that theme.
+**A theming app for macOS, with a wallpaper finder built in.** One Base24 theme index
+drives your terminal, editor, menu bar, widget stack, browser and wallpaper — with live
+colour fades where the app allows it.
 
-Other tools either recolour an image to a palette (lutgen, gowall) or extract a palette
-from an image (pywal, wallust, matugen). mood-engine goes the other way: you give it a
-palette and it finds wallpapers.
+mood-engine is built around the theme, not around the wallpaper. You curate a theme index
+once; mood-engine applies that theme to the apps that can follow it live, and to the ones
+that need a file, a signal or a notification. The desktop wallpaper is one of the things
+the theme controls, so mood-engine also finds an existing image that fits — instead of
+recolouring one.
 
-## Setup
+## What it is, and what it isn't
+
+- **It is a theme engine.** `~/.config/themes` is the source of truth: a Base24 palette
+  plus semantic roles. `mood-engine use` changes the global selection; `mood-engine sync`
+  pushes it to the desktop and to every configured app hook. Apps that implement the
+  theme-index reader follow along by themselves.
+- **It is not a wallpaper-first app.** Wallpaper discovery is a supporting feature, not
+  the product. The gallery and library exist because a theme includes a desktop
+  background; they let that background keep up with the theme instead of forcing you to
+  recolour an image to match it.
+- **Why that ordering matters.** Wallpaper-first tools start from an image: pywal,
+  wallust and matugen extract a palette from it; lutgen and gowall recolour it to a
+  palette. mood-engine starts from curated theme data and applies that everywhere,
+  wallpaper included. The theme is the input; the apps and the desktop are the output.
+
+## What it does
+
+1. **Applies the theme.** Resolves the active theme from the Base24 index and writes the
+   global selection, atomically. macOS dark/light, `current.json` written by another app,
+   and the daily wallpaper rotation all resolve through the same choice.
+2. **Keeps apps in line.** Hooks render tinted-theming templates into app theme files,
+   step a file through in-between themes for a fade, glide a terminal's ANSI colours with
+   OSC sequences, or hand the theme to a native app through JSON and a Darwin
+   notification. This is the core of the app: one theme, many apps.
+3. **Finds a wallpaper for the theme.** Asks Wallhaven, Unsplash and Pexels for
+   candidates using each API's colour filter, scores every thumbnail in OKLab against the
+   theme, and shows a ranked gallery styled in that theme. Save the ones you like;
+   mood-engine rotates them daily or pins one.
+4. **Keeps the desktop in sync.** The menu bar app re-applies the theme and wallpaper on
+   appearance flips, theme edits, wake, and day changes.
+
+```mermaid
+flowchart LR
+  TI["theme index<br/>~/.config/themes"] --> ME[mood-engine]
+  ME -->|"current.json"| TI
+  ME -->|"hooks: render, fade, notify"| APPS["apps<br/>Ghostty · Zed · SketchyBar<br/>Übersicht · Firefox"]
+  ME -->|"wallpaper from the theme's library"| DK[macOS desktop]
+  MB[menu bar app] -.->|"watches files, runs sync"| ME
+```
+
+## Quick start
 
 Requires [uv](https://docs.astral.sh/uv/) and Python ≥ 3.11 (uv fetches one if needed).
+The menu bar app needs macOS 14+ and Xcode or the Command Line Tools.
 
 ```bash
 git clone https://github.com/paraversal/mood-engine.git
 cd mood-engine
 uv sync
 uv run mood-engine themes                 # list themes; * = what "system" resolves to
-uv run mood-engine                        # gallery for the active theme, http://127.0.0.1:8765/
-uv run mood-engine firebox                # gallery for a given theme
-uv run mood-engine search firebox         # ranked list in the terminal
-uv run mood-engine apply                  # set a saved wallpaper for the active theme
-uv run mood-engine use firebox            # switch the global theme, then its wallpaper
-./macos/build.sh --install                # menu bar app (see "Menu bar app")
+uv run mood-engine use firebox            # theme the apps and the desktop
+uv run mood-engine                        # gallery: find a wallpaper for the theme
+./macos/build.sh --install                # menu bar app (optional)
 ```
 
-`uv tool install -e .` puts `mood-engine` on your PATH.
+`uv tool install -e .` puts `mood-engine` on your `PATH`.
 
-### Theme index
+## Supported apps
 
-mood-engine reads themes from a plain-JSON directory, `~/.config/themes` by default
-(override with `THEMES_DIR`). It only ever reads it:
+The integrations fall into five shapes. The full setup for each, including the exact
+hooks and app configs, is in the [guide](docs/GUIDE.md#app-support).
 
-```
-~/.config/themes/
-  schemes/<id>.json   {"name", "variant": "dark"|"light",
-                       "palette": {"base00": "#rrggbb", … "base17": …},
-                       "roles": {optional overrides, e.g. "accent": "base09"}}
-  roles.json          role -> palette slot, e.g. {"bg": "base00", "accent": "base0D", …}
-  defaults.json       {"dark": "<id>", "light": "<id>"}   used for -t system
-~/.local/state/themes/current.json   optional, same shape, overrides defaults.json
-```
+| Shape | How the app gets the theme | Tested with |
+|-------|----------------------------|-------------|
+| **Watches a file** | Hook renders the app's theme file; the app re-reads it. `fade` steps it through in-between themes. | Zed |
+| **Reloads on a signal** | Hook renders the theme file, glides the terminal's colours with OSC, then sends the reload signal. | Ghostty |
+| **Reads the theme index** | The app implements the reader protocol itself; a hook can trigger an instant refresh. | SketchyBar, Übersicht Dailies |
+| **Needs a reload command** | Hook renders the file, then runs an AppleScript/CLI command to make the app re-read it. | Übersicht fs-health, job-overview |
+| **Can't read the index** | JSON or CSS plus a Darwin notification; a native host streams it to a browser extension. | Firefox + Sidebery, native apps |
 
-Palettes use the [Base24](https://github.com/tinted-theming/base24) slots, so any
-scheme from the tinted-theming catalogue can be converted. Roles are the semantic
-colours (`bg`, `bg-inset`, `surface`, `surface-raised`, `fg`, `accent`, `error`, …)
-that the scoring and the gallery styling use. Without the directory, mood-engine
-falls back to an embedded Gruvbox dark theme.
+The ready-made hooks are:
 
-### API keys
+| Preset | What it does |
+|--------|--------------|
+| `ghostty` | Writes `~/.config/ghostty/themes/mood-engine` and fades open terminals. |
+| `zed` | Writes `~/.config/zed/themes/mood-engine.json` with an 800 ms stepped fade. |
+| `css` | Writes `--theme-*` CSS custom properties for a web UI or widget. |
+| `json` | Writes the theme as JSON and posts `local.mood-engine.theme` after every write, fade frames included. |
 
-| Source    | Key                    | Needed? | Notes |
-|-----------|------------------------|---------|-------|
-| Wallhaven | `WALLHAVEN_API_KEY`    | no      | SFW search works without a key. 45 requests/min. |
-| Unsplash  | `UNSPLASH_ACCESS_KEY`  | yes     | Create an app at <https://unsplash.com/oauth/applications>. Use the *Access Key* (not the secret). Demo apps get 50 requests/hour. |
-| Pexels    | `PEXELS_API_KEY`       | yes     | <https://www.pexels.com/api/new/>. 200 requests/hour. |
+`mood-engine hooks --presets` prints the exact app-side line each one needs. The
+theme-index protocol is documented in the `themes` Claude skill
+(`~/.claude/skills/themes/SKILL.md`, kept with the theme index in the dotfiles `themes`
+package). That skill has been used to implement mood-engine support in apps; for a new
+integration, follow it for the app-side reader, then add a hook here for the push side.
 
-Keys are read only from the environment and are never written to disk or put in URLs.
-API responses are cached by URL, without auth headers, for an hour. Sources without a
-key are skipped with a warning. For example, in `~/.zshenv` or a direnv `.envrc`:
+## How a switch works
 
-```bash
-export UNSPLASH_ACCESS_KEY=...
-export PEXELS_API_KEY=...
-```
+1. `mood-engine use THEME` writes the id into
+   `~/.local/state/themes/current.json` under its variant, atomically.
+2. It runs the hooks, so apps render the new theme, fade into it, or receive a
+   notification. Apps that follow the index with live reload pick it up on their own.
+3. It also picks the theme's wallpaper from the library — the pin, or today's pick from
+   the daily rotation — and sets it in the background, so no fade waits on the desktop.
+   The wallpaper is part of the theme, not a separate pipeline.
+4. The menu bar app repeats the same sync when macOS flips dark/light, when a theme file
+   or `current.json` changes, when you wake the Mac, and when the day changes.
 
-Other environment variables:
+After a dark/light flip the app holds the wallpaper back for a second while macOS
+redraws, so the menu bar doesn't go blank; hooks still start immediately.
 
-- `WALLHAVEN_CATEGORIES`: Wallhaven category bitmask, general/anime/people.
-  The default is `100` (general only). Use `111` for all three.
-- `THEMES_DIR`, `XDG_CONFIG_HOME`, `THEMES_STATE_DIR` and `XDG_STATE_HOME` work as in
-  the theme-index reader protocol.
-- `XDG_CACHE_HOME`: the cache lives in `$XDG_CACHE_HOME/mood-engine`, or
-  `~/.cache/mood-engine` when it is unset. Delete that folder to force fresh results.
-
-## Usage
+## Repository layout
 
 ```
-mood-engine [THEME] [options]           same as `mood-engine serve [THEME] [options]`
-mood-engine search|serve [THEME] [-q KEYWORDS] [--sources wallhaven,unsplash,pexels]
-                       [--min-res 1920x1080] [--colors 4] [--pages 1] [-k 8] [-n 40]
-mood-engine search ... [--json] [--html out/gallery.html]
-mood-engine serve  ... [--port 8765] [--no-open]
-mood-engine apply   [THEME] [--next] [--print] [--dry-run]
-mood-engine use     THEME [--appearance]
-mood-engine sync    [--appearance dark|light] [--wallpaper] [--hooks] [--force] [--json]
-mood-engine hooks   [--init] [--presets] [--eject NAME] [--run [NAME ...]]
-mood-engine render  [TEMPLATE | builtin:NAME] [THEME] [-o OUT] [--vars]
-mood-engine fade    [THEME] [--from THEME] [--app ghostty] [--ms 400] [--no-reload] [--dry-run]
-mood-engine pin     [THEME] [--key SOURCE:ID]
-mood-engine unpin   [THEME]
-mood-engine library [THEME]
-mood-engine status  [--appearance dark|light]
-mood-engine themes
+src/mood_engine/              CLI, theme reader, scoring, sources, library, server, sync/hooks
+src/mood_engine/templates/    built-in templates: Ghostty, Zed, CSS, theme JSON
+macos/                        native menu bar app (Swift, AppKit)
+tests/                        pytest suite
+docs/GUIDE.md                 setup, usage, theming hooks, app support, wallpaper search
 ```
 
-- `THEME` (or `-t/--theme`) is a theme id, or `system` (the default). `system` resolves through
-  `current.json` and then `defaults.json` for the current macOS appearance, then falls
-  back to the first theme. If the index is missing, an embedded Gruvbox theme is used.
-- `-q` adds keywords such as `mountains`, `abstract` or `minimal`. Keywords help a lot,
-  especially for light themes.
-- In the gallery you can switch theme, keywords, minimum resolution and sources. The
-  `JSON` link returns the same ranking as data.
-
-mood-engine never writes to `~/.config/themes`. The only file it writes in
-`~/.local/state/themes` is `current.json`, and only when you run `mood-engine use` (or
-pick a theme in the menu bar app).
-
-## Switching the theme
-
-`mood-engine use THEME` is the theme index's "apply to all apps" action:
-
-1. It writes the theme id into `~/.local/state/themes/current.json` under the theme's
-   variant (`dark` or `light`) and keeps the other key. The file is replaced atomically.
-   If it is a symlink, the link's target is written.
-2. If the theme is now active (its variant matches the macOS appearance), it sets the
-   theme's wallpaper as `mood-engine apply` would. With nothing saved for the theme, the
-   switch still happens and a note says so.
-3. If the active theme changed, it runs your [hooks](#hooks-for-apps-without-live-reload).
-
-Apps that follow the themes protocol with live reload pick up the change straight away.
-Others need a hook, or pick it up the next time they start.
-
-Switching to a theme of the other variant, e.g. `use solarized-light` while macOS is
-dark, sets your light theme but changes nothing visible until macOS goes light. Pass
-`--appearance` to also switch macOS to the theme's variant. That goes through System
-Events, so the first time macOS asks to let your terminal control it (System Settings →
-Privacy & Security → Automation).
-
-To change only the wallpaper without touching the global theme, use
-`mood-engine apply THEME`.
-
-## Library: saving wallpapers and switching them with the theme
-
-**Save** on a gallery card downloads the full image into your library and pairs it with
-the theme you are browsing. Save the same image while browsing another theme to pair it
-there too; it isn't downloaded again. After saving, **Set as wallpaper** sets it right
-away. The **Library** tab shows what is saved for a theme:
-
-- **Set as wallpaper** sets it now and marks it as today's wallpaper for the theme.
-- **Pin** fixes this wallpaper for the theme. Without a pin, the theme rotates: each day
-  a random saved wallpaper is drawn, never the same one twice in a row.
-- **Remove** unpairs it from the theme. The file is deleted once no theme uses it.
-
-`mood-engine apply [THEME]` sets the wallpaper for a theme (by default the active one)
-from the library: the pin if there is one, otherwise today's pick, drawing a new one when
-the day has changed.
-
-- `--next` draws a new random wallpaper now (ignored while one is pinned).
-- `--print` prints the file's path instead of setting it, for other wallpaper setters.
-- `--dry-run` shows the choice and changes nothing.
-- `mood-engine library` lists what is saved, pinned and current per theme.
-
-- `mood-engine pin [THEME]` pins the theme's current wallpaper (`--key` picks another
-  saved one); `mood-engine unpin [THEME]` goes back to daily rotation.
-
-The [menu bar app](#menu-bar-app) re-applies the wallpaper when macOS flips between dark
-and light on its own, when another app writes `current.json`, and when the day changes.
-Without it, run `mood-engine sync` after such a change.
-
-**Setting the wallpaper (macOS).** mood-engine calls
-`NSWorkspace.setDesktopImageURL` for every screen through `osascript`'s JavaScript ObjC
-bridge, so it needs no extra Python packages and no Automation permission. macOS only
-changes the *current* Space of each screen. Other Spaces keep their wallpaper until you
-apply again while they are active. Other platforms aren't supported yet; use
-`mood-engine apply --print` with your own setter.
-
-**Where things live.** Nothing is written to the theme index.
-
-```
-~/.local/share/mood-engine/wallpapers/<source>-<id>.<ext>   saved images
-~/.local/share/mood-engine/thumbs/<source>-<id>.jpg          previews for the Library tab
-~/.local/state/mood-engine/library.json                     pairings, pins, current pick
-```
-
-`MOOD_ENGINE_DATA_DIR` and `MOOD_ENGINE_STATE_DIR` override the two directories;
-otherwise `XDG_DATA_HOME` and `XDG_STATE_HOME` are honoured. `library.json` is meant to
-be read by other programs too. Its format and locking rules (an exclusive `flock` on
-`library.lock` for every write, then an atomic rename) are documented at the top of
-`src/mood_engine/library.py`.
-
-**The local server** listens on 127.0.0.1 only. It refuses requests whose `Host` header
-isn't local, and only accepts actions as same-origin JSON `POST`s, so other websites
-can't save or delete files through it. It serves only files that are in the library.
-
-## Keeping everything in sync
-
-`mood-engine sync` brings the desktop in line with the active theme (what apps set to
-"System" show: `current.json`, then `defaults.json`, for the macOS appearance) and
-compares it with the last sync, kept in `~/.local/state/mood-engine/sync.json`:
-
-| Since the last sync                     | Wallpaper            | Hooks            |
-|-----------------------------------------|----------------------|------------------|
-| active theme changed                    | set                  | all run          |
-| same theme, colours edited in a scheme  | –                    | all run          |
-| a hook or its template edited, or added | –                    | that hook runs   |
-| same theme, new day                     | set (daily rotation) | –                |
-| nothing                                 | –                    | –                |
-
-Each hook remembers a fingerprint of what it last ran for: the theme's colours, its
-own definition and its template. `--wallpaper` and `--hooks` force either one, `--force`
-both. A lock serialises
-concurrent syncs, so one change never runs the hooks twice, even when `mood-engine use`
-and the menu bar app both notice it. `--json` prints a report; `status` prints
-everything the menu bar app shows.
-
-### Hooks: keeping other apps in line
-
-Apps that don't read the theme index, or don't reload it on their own, are kept in
-line by hooks. A hook renders a template into the app's theme file, runs a command
-(a reload signal, a widget refresh, a restart), or both: render first, then run.
-
-**Where they live:** `~/.config/mood-engine/` (`$MOOD_ENGINE_CONFIG_DIR`, or
-`$XDG_CONFIG_HOME/mood-engine`):
-
-```
-~/.config/mood-engine/
-  hooks.toml          the hooks
-  templates/          your own templates (paths are relative to hooks.toml)
-```
-
-Both can come from a dotfiles repo with GNU stow (e.g. a `mood-engine` package holding
-`.config/mood-engine/hooks.toml` and `.config/mood-engine/templates/…`). The menu bar app
-watches the real files the symlinks point to, so editing them in the repo counts.
-`mood-engine hooks --init` writes a commented example `hooks.toml` if there is none:
-[`templates/hooks.example.toml`](src/mood_engine/templates/hooks.example.toml), which
-documents every key.
-
-**Presets** are ready-made hooks. Each names a built-in template, where its output
-goes and what to run; any key next to `preset` overrides the preset's:
-
-```toml
-[[hook]]
-preset = "ghostty"   # then `theme = mood-engine` in Ghostty's config
-
-[[hook]]
-preset = "zed"       # then "theme": "mood-engine" in Zed's settings
-fade = 1200          # slower than the preset's 800 ms
-```
-
-| Preset    | Template              | Output                                   | Then                      |
-|-----------|-----------------------|------------------------------------------|---------------------------|
-| `ghostty` | `builtin:ghostty`     | `~/.config/ghostty/themes/mood-engine`   | `terminal = "ghostty"`, `fade = 400` |
-| `zed`     | `builtin:zed.json`    | `~/.config/zed/themes/mood-engine.json`  | `fade = 800`              |
-| `css`     | `builtin:colors.css`  | `~/.cache/mood-engine/colors.css`        | –                         |
-| `json`    | `builtin:theme.json`  | `~/.cache/mood-engine/theme.json`        | `notify = "local.mood-engine.theme"`, `fade = 800` |
-
-`mood-engine hooks --presets` prints each preset's keys and the line the app's own
-config needs. The built-in templates live in
-[`src/mood_engine/templates/`](src/mood_engine/templates) and are used where they are,
-not copied: when mood-engine improves one, the next sync re-renders it (the template's
-text is part of the hook's fingerprint). Any hook can use one with
-`template = "builtin:NAME"`. To customise one, `mood-engine hooks --eject zed` (or
-`--eject builtin:zed.json`) copies it into `templates/` and prints the `template = …`
-line to put in the hook instead; it never overwrites a file.
-
-Your own hooks name every key themselves:
-
-```toml
-[[hook]]
-name = "Alacritty"
-template = "templates/alacritty.toml"       # relative to hooks.toml
-output = "~/.config/alacritty/theme.toml"   # written atomically, only when it changes
-# fade = 800         # ms: step the file through in-between themes first (see Zed)
-# notify = "my.app.theme"  # post this Darwin notification after each write (see Theme JSON)
-
-[[hook]]
-name = "fs-health widget"
-run = "osascript -e 'tell application id \"tracesOf.Uebersicht\" to reload widget id \"fs-health-widget-index-jsx\"'"
-timeout = 10         # seconds, default 30; the command and all it started are killed after it
-# enabled = false
-```
-
-For Übersicht, reload a single widget as above: it keeps the widget's DOM and state,
-so CSS transitions can glide to the new colours. The global `refresh` reloads the whole
-page, loses widget state, and can leave the webview blank.
-
-**Templates** use the [tinted-theming](https://github.com/tinted-theming/home) builder
-variables, so existing base16/base24 templates for many apps work unchanged:
-`{{scheme-name}}`, `{{scheme-slug}}`, `{{scheme-variant}}`, `{{base08-hex}}`,
-`{{base08-rgb-r}}`, `{{base08-dec-r}}`, `{{base08-hex-bgr}}`, … for `base00`–`base17`. The
-theme's roles come with the same suffixes: `{{role-bg-hex}}`, `{{role-accent-rgb-r}}`,
-and so on. Sections work on `scheme-is-dark-variant` / `scheme-is-light-variant`
-(`{{#…}}…{{/…}}`, inverted `{{^…}}`). Unknown variables are an error, so a typo never
-writes a broken theme file; the hook fails and the old output stays.
-
-```bash
-mood-engine render templates/alacritty.toml        # preview with the active theme
-mood-engine render builtin:zed.json solarized-light -o /tmp/x.json
-mood-engine render --vars                           # every variable and its value
-```
-
-**Commands** run with `/bin/sh -c` and get `MOOD_THEME`, `MOOD_THEME_NAME`,
-`MOOD_VARIANT`, `MOOD_PREVIOUS_THEME`, `MOOD_APPEARANCE`, `MOOD_WALLPAPER`, `MOOD_OUTPUT`
-(the rendered file), `MOOD_OUTPUT_CHANGED` (`1`/`0`), `MOOD_ENGINE` (the path of this
-mood-engine, since the menu bar app's `PATH` may not have it), `THEMES_DIR` and
-`THEMES_STATE_DIR`. `MOOD_PREVIOUS_THEME` is empty unless the active theme changed.
-
-**Running them:** see the table above for when a sync runs hooks. They all start at the
-same time, so Ghostty's and Zed's fades glide together and a slow hook doesn't hold up
-the rest: a switch takes as long as the slowest hook (about 0.7 s with Ghostty, Zed and
-two Übersicht widgets, down from 1.7 s one after another). When a hook needs another
-one's result, `after = "Name"` (or a list of names) makes it wait for those; they must
-be defined above it. `mood-engine hooks` lists them with their last run;
-`mood-engine hooks --run [NAME …]` runs all or some now. A failing hook doesn't stop
-the others; its exit code and the end of its output are
-kept in `sync.json` and shown in the menu bar app. A hook runs once per change, even if
-it failed, so a broken one isn't retried in a loop; fix it and it runs again. Hooks must
-not call `mood-engine use` or `sync` (such calls are skipped).
-
-### Ghostty, with a fade between themes
-
-Ghostty reads its colours from a theme file and reloads its config on `SIGUSR2`, so one
-hook keeps it in line: add the preset and point Ghostty at the theme.
-
-```toml
-[[hook]]
-preset = "ghostty"
-# stands for: template = "builtin:ghostty", output = "~/.config/ghostty/themes/mood-engine",
-#             terminal = "ghostty", fade = 400
-```
-
-```
-# ~/.config/ghostty/config
-theme = mood-engine
-```
-
-Use a single `theme = mood-engine`, not Ghostty's `light:…,dark:…` form: mood-engine
-already follows the macOS appearance, and with one file every switch, including a
-dark/light flip, goes through the fade.
-
-`terminal = "ghostty"` makes the hook glide every open Ghostty terminal from the previous
-theme to the new one, in `fade` ms (400 by default), right after writing the theme
-file, and leaves Ghostty on the reloaded file. It runs inside mood-engine, which saves
-the 0.2 s it takes to start another one. `mood-engine fade` does the same from the
-command line, or from your own hook's `run = '"$MOOD_ENGINE" fade'`:
-
-1. It writes the old theme's colours to each terminal's tty as OSC colour sequences
-   (ANSI 0–15, foreground, background, cursor), as a program in the terminal could.
-2. It sends Ghostty `SIGUSR2`. Ghostty reloads the config, which now names the new
-   theme, but colours set by OSC win over the config, so nothing changes on screen yet.
-3. It steps those colours to the new theme's in OKLab, eased in and out, about 60
-   times a second.
-4. It drops the OSC colours again (OSC 104/110/111/112). What's left is the reloaded
-   config, which by then shows the same colours.
-
-With no previous theme (the first sync, an edited scheme, `hooks --run`), it only
-reloads. It finds the terminals as the ttys of the processes Ghostty started, so it needs
-no permissions. It only *sets* colours and never asks the terminal for any, because the
-answer would arrive in the shell as typed input. `--dry-run` lists the terminals it
-would touch. `--from`/`THEME` override the two themes, so
-`mood-engine fade solarized-light --from firebox` previews a switch without changing
-anything else (Ghostty reloads, but its theme file is unchanged).
-
-Caveats:
-
-- The in-between colours come from the mapping built into mood-engine (black is
-  `base01`, bright colours are base24's `base12`–`base17`). If you change the template's
-  mapping, the fade ends with a small step to your template's colours.
-- Programs that set the terminal's colours themselves lose those at step 4. Programs
-  that draw in true colour, like Neovim with `termguicolors`, keep their own colours
-  and don't fade.
-- On a dark/light flip, the fade starts once the menu bar app has noticed the flip and
-  run the hooks, a moment after the rest of macOS has switched.
-- For another terminal that understands OSC 4/10/11/12 (kitty, WezTerm, iTerm2),
-  `fade --app NAME --no-reload` glides its terminals and leaves the new colours set,
-  but it can't make that app reload its own config.
-
-### Zed, with a stepped fade
-
-Zed reads theme families from `~/.config/zed/themes` and re-reads a file there when it
-changes, so the hook needs no command: add the preset and select the theme in Zed's
-settings.
-
-```toml
-[[hook]]
-preset = "zed"
-# stands for: template = "builtin:zed.json",
-#             output = "~/.config/zed/themes/mood-engine.json", fade = 800
-```
-
-```jsonc
-// ~/.config/zed/settings.json
-"theme": "mood-engine",
-```
-
-The template fills all 142 colours of Zed's theme schema (v0.2.0) from the theme's
-roles; syntax colours follow the base16 styling guide, and Zed's terminal gets the same
-ANSI colours as Ghostty. As with Ghostty, use the single theme rather than Zed's
-`{"mode": "system", …}` form, so a dark/light flip goes through mood-engine and fades.
-
-**`fade`** works for any hook with a template whose app reloads the file by itself.
-When the active theme changes, the hook first writes in-between themes to the output,
-about every 110 ms, then the final file. The in-between themes mix every palette slot
-and role of the previous and the new theme in OKLab, eased in and out, so any template
-works unchanged. The variant flips halfway, so Zed's dark/light window chrome switches
-once. Without a previous theme (the first sync, an edited scheme or template,
-`hooks --run`) or when the file already shows the new theme, it writes the final file
-straight away.
-
-Zed re-reads a changed theme file at most about 10 times a second; faster changes
-are merged (measured with Zed 1.28: 40 writes 16 ms apart gave 7 reloads, 10 writes
-100 ms apart gave 9). So the fade is a glide in about 8 steps rather than Ghostty's 60
-frames a second. A longer `fade` gives more steps; each step redraws every Zed window.
-
-### Theme JSON, for native apps and tweaks
-
-```toml
-[[hook]]
-preset = "json"
-# stands for: template = "builtin:theme.json", output = "~/.cache/mood-engine/theme.json",
-#             notify = "local.mood-engine.theme", fade = 800
-```
-
-This hands the active theme to anything that can read a file: a native tweak, a Swift
-app, SketchyBar, Hammerspoon, a shell script with `jq`. The file holds the theme's id,
-its variant, every role and `base00`–`base17` as `#rrggbb`:
-
-```json
-{"id": "gruvbox-dark-hard", "variant": "dark",
- "roles": {"bg": "#1d2021", "accent": "#83a598", …}, "palette": {"base00": "#1d2021", …}}
-```
-
-After every write, the hook posts the Darwin notification `local.mood-engine.theme`
-(`notify_post(3)`). Any process can listen, sandboxed ones too, and a post nobody
-listens to costs nothing. With `fade`, the file steps through in-between themes like
-Zed's, with a post after each step, so a listener that just applies the colours it reads
-glides along with Ghostty and Zed. The final write always posts, even when the file
-didn't change, so `mood-engine hooks --run "Theme JSON"` nudges a listener that started
-late. Watch it from a shell:
-
-```bash
-while notifyutil -1 local.mood-engine.theme; do jq -c .roles.bg ~/.cache/mood-engine/theme.json; done
-```
-
-In Objective-C (a menu bar app, or a tweak injected into Finder), read the file once at
-start and again on every post:
-
-```objc
-#import <notify.h>
-
-static void MoodApply(void) {
-    NSString *path = [@"~/.cache/mood-engine/theme.json" stringByExpandingTildeInPath];
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    NSDictionary *theme = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    NSString *bg = theme[@"roles"][@"bg"];   // "#1d2021"
-    if (bg) { /* turn it into an NSColor and apply it */ }
-}
-
-int token;
-MoodApply();
-notify_register_dispatch("local.mood-engine.theme", &token, dispatch_get_main_queue(),
-                         ^(int t) { MoodApply(); });
-```
-
-A sandboxed process can receive the notification but not read `~/.cache`. Point `output`
-somewhere it can read, or have it read through a helper. Finder and the Dock aren't
-sandboxed. Any `[[hook]]` with a `template` can post a notification with `notify = "NAME"`.
-The theme's name is left out of the JSON because templates don't escape quotes.
-
-## Menu bar app
-
-`macos/` holds a small native menu bar app (Swift, AppKit, macOS 14+). It keeps no logic
-of its own: it watches for changes and calls the CLI.
-
-```bash
-./macos/build.sh             # builds macos/build/mood-engine.app
-./macos/build.sh --install   # copies it to ~/Applications and starts it
-```
-
-It needs Xcode or the Command Line Tools. The app runs the repo's
-`.venv/bin/mood-engine` (path baked in at build time; run `uv sync` first), or else
-`mood-engine` on your login shell's `PATH`, or one you pick from its menu. Hooks get
-your login shell's `PATH` too.
-
-**When it syncs:** on launch; when macOS switches between dark and light, including on
-its own schedule; when `current.json`, `defaults.json`, a scheme, `hooks.toml` or a
-template changes (watched at their real paths, so stow symlinks and edits in the
-dotfiles repo count); after waking from sleep;
-and when the day changes (daily rotation). When you switch Spaces or plug in a screen,
-a Space that still shows another wallpaper gets the current one (turn off
-**Keep Wallpaper on Every Space** to leave other Spaces alone).
-
-**The menu** shows the active theme and its wallpaper, and offers:
-
-- Next Wallpaper, Pin / Unpin, Find Wallpapers… (the gallery) and Library…. The app
-  starts `mood-engine serve` on first use and stops it when it quits.
-- Dark Theme / Light Theme submenus that set the global theme for that variant (as
-  `mood-engine use` does) and Switch to Light/Dark Mode. Switching the appearance goes
-  through System Events, so macOS asks once for Automation permission. Because the app
-  is ad-hoc signed, it may ask again after a rebuild.
-- Hooks: the last run with ✓/✗ per hook (click one for its output), Run Hooks Now and
-  Edit hooks.toml….
-- Re-apply Wallpaper, Open at Login, Quit.
-
-The menu bar icon turns into a warning triangle when a hook failed or a sync hit an
-error; the menu has the details.
-
-## How it works
-
-1. **Key colours.** mood-engine takes the theme's `bg` role and its `accent` role, then
-   adds the most saturated `base08`–`base0F` slots whose hues are distinct, up to
-   `--colors`.
-2. **Colour vocabularies.** Each key colour is translated per API:
-   - Wallhaven: snapped to its fixed list of 29 hex colours by nearest OKLab distance,
-     with chroma weighted up so the hue wins.
-   - Unsplash: mapped to a named colour (`black`, `white`, `black_and_white`, or the
-     nearest OKLCH hue among red, orange, yellow, green, teal, blue, purple and
-     magenta).
-   - Pexels: the hex value is passed through unchanged.
-
-   The background query fetches 3× as many pages, because it decides most of the score.
-
-   Wallhaven's colour filter only means "this colour appears somewhere", and its
-   toplist is mostly dark: `colors=ffffff` returned 2 light images out of 24. So for
-   **light themes**, when you give no keywords, the Wallhaven background query also
-   runs with the keywords `white background` and `minimalism` (20/24 and 12/24
-   light in the same test). Dark themes don't need this. The gallery and terminal
-   output list these keywords next to the colour filters. The list is
-   `pipeline.BG_HINTS`.
-3. **Palette extraction.** Each thumbnail is downsampled to 96 px and converted to
-   OKLab, then clustered with k-means (k = 8, k-means++ seeding, deterministic). Each
-   cluster's weight is its share of the image area.
-4. **Score** (0–100) = 40 % background + 40 % palette + 20 % (1 − penalty):
-   - **Background fit** has two halves:
-     - The area-weighted median lightness must fall in the lightness band of the
-       theme's background roles (`bg`, `bg-inset`, `surface`, `surface-raised`, so
-       `base00`–`base02` plus overrides). Outside the band, the score falls off as a
-       Gaussian.
-     - Enough of the image's area must sit close to one of those colours. The distance
-       for this check counts tint (a/b) double, so a navy background doesn't pass as
-       Firebox's warm near-black.
-   - **Palette fit** = exp(−d / 0.06), where d is the area-weighted mean OKLab distance
-     from each cluster to the nearest colour in the scheme (all 24 slots plus resolved
-     roles).
-   - **Off-hue penalty**: the share of area in saturated clusters (chroma > 0.05,
-     counted fully from 0.15) whose hue is more than 20° away from every chromatic
-     scheme colour. Reaching full penalty takes 40° beyond that tolerance, and the
-     penalty is maxed out at 30 % of the area. A bright blue sky against Firebox is the
-     typical case.
-
-   All the constants are in `score.Weights`.
-
-   Re-uploads of the same image at another resolution are dropped, keeping the
-   better-ranked copy. Two images count as the same when every cell of their 16×9
-   OKLab grids is within 0.05.
-5. **Gallery.** The gallery is styled with the theme's roles as `--theme-*` CSS
-   variables. Each card shows the score, a breakdown, the extracted palette strip, the
-   resolution, the colour filter that found the image, attribution and links.
-
-### Respecting the APIs' terms
-
-- **Unsplash:** images are hotlinked from the returned `urls`. Every card says
-  "Photo by *name* on Unsplash", with links that carry
-  `utm_source=mood-engine&utm_medium=referral`. **Save** and **Recolor** call the
-  photo's `download_location` endpoint before fetching the file, as the API guidelines
-  require. The static `--html` output can't do that, so there Download links to the
-  photo page on Unsplash instead. Saved Unsplash images keep their photographer credit
-  in the Library tab.
-- **Pexels:** each card credits the photographer and links to Pexels.
-- **Wallhaven:** only SFW results are requested, and each card links to the wallpaper's
-  page. Wallhaven images come from many uploaders with mixed licences, so check the
-  source before redistributing one.
-- Results are cached so the hourly limits on demo keys last. One `serve` page costs at
-  most about 6 requests per source with the defaults.
-
-### Recolouring near misses (stretch goal)
-
-**Recolor** on a card (server mode) downloads the full image and nudges it toward the
-theme. Every pixel is pulled toward a Gaussian-weighted blend of nearby scheme colours
-in OKLab: chroma at 75 %, lightness at 35 %. The output is capped at 2560 px. It is a
-small built-in take on what [lutgen](https://github.com/ozwaldorf/lutgen-rs) does. On
-an Unsplash image it counts as a download and triggers `download_location`. In one test
-it raised a green forest photo from 77 to 85 for Firebox. lutgen and gowall aren't
-wired in, because neither was installed when this was built. They would be a better
-backend for this.
+## Documentation
+
+- [Setup and usage guide](docs/GUIDE.md) — install, theme index, commands, menu bar app,
+  hooks and presets, app integrations, wallpaper gallery and library, scoring.
+- [Hook example](src/mood_engine/templates/hooks.example.toml) — every key, commented.
+- `mood-engine-firefox` — companion repository with the Firefox native host,
+  WebExtension and Sidebery integration.
 
 ## Development
 
 ```bash
-uv run pytest -q
+uv run pytest -q            # test suite
+./macos/build.sh            # build the menu bar app
+./macos/build.sh --install  # build, copy to ~/Applications and start it
 ```
 
-The tests use synthetic striped images and embedded copies of the Firebox and
-Solarized Light schemes, so they don't need `~/.config/themes` or network access. They
-cover:
+The tests use synthetic images and embedded schemes, so they need neither
+`~/.config/themes` nor network access. See the [guide](docs/GUIDE.md#development) for
+what they cover.
 
-- OKLab reference values and round-trips
-- area weights from k-means
-- dark and light themes each preferring a matching background
-- tint sensitivity
-- off-hue penalty versus in-scheme hues
-- vocabulary snapping
-- query planning (light-theme background keywords; none for dark themes or when you
-  give keywords), duplicate removal, and the `mood-engine THEME` shortcut
-- the reader protocol, including `current.json` precedence and the embedded fallback
-- Unsplash and Pexels parsing with mocked responses, and attribution
-- recolouring raising the score
-- the library: storage, rejecting non-images, daily rotation, pins, unpairing and file
-  deletion, and `apply` / `library` (desktop calls mocked)
-- `use`: merging into `current.json`, other-variant themes, `--appearance`, symlinked
-  `current.json` (appearance and desktop calls mocked)
-- the server's save, pair, apply, pin and remove routes against a real local server,
-  including the Unsplash download ping and refusing foreign hosts and origins
-- `sync`: first sync, no-op, appearance flips, daily rotation without hooks,
-  `current.json` written by another app, `use` running hooks exactly once
-- hooks: environment, failures and timeouts (process group killed), disabled hooks, a
-  broken `hooks.toml`, nested calls from a hook; `pin`/`unpin` and `status`
-- templates: tinted-theming variables and roles, sections, standalone tag lines, errors
-  for unknown variables; rendering before the command, writing only on change,
-  symlinked outputs; per-hook fingerprints (edited scheme, edited template, new or
-  re-enabled hook); config validation; a stowed (symlinked) config and its watch paths;
-  `render` and `hooks --run NAME`
-- hooks at the same time: they overlap and report in config order; `after` waits for
-  the named hooks, must name hooks above it, and isn't part of the fingerprint
-- Ghostty: the template renders the same colours the fade uses, finding terminals
-  through a root-owned `login`, and the fade on a real pseudo-terminal: old colours
-  pinned before the reload, every colour ending on the new theme, the pins dropped
-  last; reload only without a previous theme; `--no-reload`; unopenable ttys; `fade`
-  reading the hook environment; `MOOD_ENGINE` in hooks; the `terminal` key gliding
-  from the previous theme in-process (no file frames), its errors and validation. No
-  test signals a real process or runs your real hooks: every test sees no terminals.
-- Zed: the template renders a theme family with the theme's colours and Ghostty's
-  ANSI colours; blending (end points, OKLab midpoint, variant flip); a hook's `fade`
-  writing eased frames from the previous theme before the final file, and skipping
-  them without a previous theme or when the file is already current; `fade`
-  validation; hooks without `fade` keep their fingerprint.
-- Presets: every preset's built-in template renders; every example hook in
-  `hooks.example.toml` parses once uncommented; presets fill in and keys override
-  them; unknown presets and built-ins are errors; a built-in template's fingerprint
-  names it rather than the install path; `hooks --presets`, `--eject` (never
-  overwriting), `--init` (only when missing) and `render builtin:…`.
+## Requirements and limits
 
-The menu bar app has no automated tests; build it with `./macos/build.sh`.
-
-## Known limits / ideas
-
-- Results depend on what the APIs return for a colour filter. Wallhaven's filter only
-  requires the colour to appear somewhere in the image, so the ranking does the real
-  work. Use `--pages` to widen the pool.
-- Duplicate detection only catches rescaled copies. A re-crop of the same art (one
-  pair in the Solarized Light pool) shifts every cell and shows up twice.
-- Thumbnails are about 200–300 px wide, which is fine for palettes but not for fine
-  detail.
-- An earth mover's distance between the image and scheme palettes would reward
-  coverage of the accent colours. The current nearest-colour distance doesn't.
-- The Unsplash `color`/`blur_hash` and Pexels `avg_color` fields could pre-filter
-  results before any thumbnail is downloaded.
+- macOS for wallpaper setting and the menu bar app; the search, rendering and local
+  gallery also work elsewhere.
+- Wallpaper setting changes only the current Space of each screen; other Spaces keep
+  their wallpaper until you apply again while they are active.
+- Results depend on the APIs' colour filters; Wallhaven's filter only requires the colour
+  to appear somewhere, so the ranking does the real work.
+- The menu bar app is ad-hoc signed, so macOS may ask for Automation permission again
+  after a rebuild.

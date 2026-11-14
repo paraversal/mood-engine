@@ -1,7 +1,7 @@
 [project]
 name = "mood-engine"
 version = "0.1.0"
-description = "Suggest existing wallpapers that match a Base24 theme from ~/.config/themes"
+description = "Base24 theme engine for macOS: app theming, wallpaper and live hooks"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26", "pillow>=10"]
