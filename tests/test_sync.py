@@ -383,6 +383,18 @@ def test_wallpaper_is_set_while_the_hooks_run(dirs, mac, hooks, monkeypatch):
     assert log.read_text().strip().endswith("w-a.png")       # hooks still get the path
 
 
+def test_wallpaper_delay_holds_back_only_the_wallpaper(dirs, mac, hooks, monkeypatch):
+    from mood_engine import desktop
+    when = {}
+    hooks(f'\n[[hook]]\nname = "t"\nrun = "true"\n')
+    monkeypatch.setattr(desktop, "set_wallpaper", lambda p: when.setdefault("wp", time.monotonic()))
+    save("w:a")
+    t0 = time.monotonic()
+    rep = sync.sync(wallpaper_delay=0.3)
+    assert rep["wallpaper_set"] and when["wp"] - t0 >= 0.3
+    assert all(h["seconds"] < 0.3 for h in rep["hooks"])   # hooks didn't wait
+
+
 def test_wallpaper_failure_is_reported_and_hooks_still_run(dirs, mac, hooks, monkeypatch):
     from mood_engine import desktop
 

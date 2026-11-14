@@ -84,21 +84,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// switched, so every moment here is a moment the fades start late. The `lastDark`
     /// check already makes the second of macOS's two signals for one flip a no-op.
     /// (File changes and wake still go through `syncSoon`, which merges bursts.)
+    /// The wallpaper alone waits: set while macOS is still redrawing for the new
+    /// appearance, it can leave the menu bar blank until something clicks it.
     private func appearanceMayHaveChanged() {
         let dark = Desktop.isDark
         guard dark != lastDark else { return }
         lastDark = dark
-        sync()
+        sync(wallpaperDelay: Self.flipWallpaperDelay)
     }
+
+    private static let flipWallpaperDelay = 1.0
 
     // MARK: - Running the CLI
 
     private var appearance: String { Desktop.isDark ? "dark" : "light" }
 
-    private func sync(wallpaper: Bool = false, hooks: Bool = false) {
+    private func sync(wallpaper: Bool = false, hooks: Bool = false, wallpaperDelay: Double = 0) {
         var args = ["sync", "--json", "--appearance", appearance]
         if wallpaper { args.append("--wallpaper") }
         if hooks { args.append("--hooks") }
+        if wallpaperDelay > 0 { args += ["--wallpaper-delay", String(wallpaperDelay)] }
         runCLI(args)
     }
 

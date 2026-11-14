@@ -156,7 +156,7 @@ def _print_sync(rep: dict, show_theme: bool = True) -> int:
 
 def cmd_sync(a) -> int:
     rep = syncmod.sync(a.appearance, force_wallpaper=a.wallpaper or a.force,
-                       force_hooks=a.hooks or a.force)
+                       force_hooks=a.hooks or a.force, wallpaper_delay=a.wallpaper_delay)
     if a.json:
         print(json.dumps(rep, indent=1))
         return 0 if not rep["error"] else 1
@@ -498,6 +498,9 @@ def main(argv: list[str] | None = None) -> int:
     sy.add_argument("--wallpaper", action="store_true", help="set the wallpaper even if nothing changed")
     sy.add_argument("--hooks", action="store_true", help="run the hooks even if nothing changed")
     sy.add_argument("--force", action="store_true", help="both --wallpaper and --hooks")
+    sy.add_argument("--wallpaper-delay", type=float, default=0.0, metavar="SECONDS",
+                    help="wait this long before setting the wallpaper (hooks start at once); "
+                    "the menu bar app uses it after a dark/light flip")
     sy.add_argument("--json", action="store_true", help="print the report as JSON")
     sy.set_defaults(func=cmd_sync)
 

@@ -426,14 +426,17 @@ def _locked() -> Iterator[None]:
 
 
 class _Background(threading.Thread):
-    """Runs fn(*args) now, in the background; join() waits, `error` is what it raised."""
+    """Runs fn(*args) in the background, after `delay` seconds; join() waits, `error`
+    is what it raised."""
 
-    def __init__(self, fn, *args) -> None:
+    def __init__(self, fn, *args, delay: float = 0.0) -> None:
         super().__init__(daemon=True, name="wallpaper")
-        self.fn, self.args, self.error = fn, args, None
+        self.fn, self.args, self.delay, self.error = fn, args, delay, None
         self.start()
 
     def run(self) -> None:
+        if self.delay > 0:
+            time.sleep(self.delay)
         try:
             self.fn(*self.args)
         except Exception as e:  # noqa: BLE001 - reported in the sync's report
@@ -454,10 +457,13 @@ def active_theme(appearance: themes.Appearance) -> themes.Theme | None:
 
 
 def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool = False,
-         force_hooks: bool | Iterable[str] = False, today: date | None = None) -> dict:
+         force_hooks: bool | Iterable[str] = False, today: date | None = None,
+         wallpaper_delay: float = 0.0) -> dict:
     """Apply what changed since the last sync. `force_hooks` is True (all hooks) or
-    hook names to run regardless of their fingerprint. Returns a report (also the
-    CLI's JSON):
+    hook names to run regardless of their fingerprint. `wallpaper_delay` holds the
+    wallpaper back (hooks still start at once): right after a dark/light flip, setting
+    it while macOS is still redrawing for the new appearance can leave the menu bar
+    blank until it is clicked. Returns a report (also the CLI's JSON):
 
     {"theme", "name", "variant", "previous", "appearance", "changed": bool (theme id),
      "edited": bool (same theme, different colours), "wallpaper": path | None,
@@ -493,7 +499,7 @@ def sync(appearance: themes.Appearance | None = None, *, force_wallpaper: bool =
         if changed or force_wallpaper or prev.get("day") != today_s:
             try:
                 wallpaper = desktop.apply(theme.id, set_desktop=False)["path"]
-                setter = _Background(desktop.set_wallpaper, Path(wallpaper))
+                setter = _Background(desktop.set_wallpaper, Path(wallpaper), delay=wallpaper_delay)
             except library.LibraryError as e:
                 wallpaper, report["note"] = None, str(e)
         report["wallpaper"] = wallpaper
