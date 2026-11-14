@@ -24,6 +24,13 @@
 # preset = "zed"
 # fade = 1200          # e.g. a slower fade
 #
+# Alfred: also choose the "mood-engine" theme in Alfred Preferences → Appearance, for
+# both the light and the dark theme. The hook writes it into Alfred's preferences and
+# makes Alfred re-read it. With Alfred's preference syncing on, point `output` at
+# <sync folder>/Alfred.alfredpreferences/themes/theme.custom.mood-engine/theme.json.
+# [[hook]]
+# preset = "alfred"
+#
 # CSS custom properties (--theme-bg, --theme-accent, …) for web pages and widgets.
 # [[hook]]
 # preset = "css"

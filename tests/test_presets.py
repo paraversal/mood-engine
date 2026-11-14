@@ -1,5 +1,8 @@
 """Built-in templates, presets, the example hooks.toml, `hooks --presets/--eject/--init`."""
 
+import json
+import re
+
 import pytest
 
 from mood_engine import cli, presets, sync, template
@@ -17,7 +20,7 @@ def test_every_preset_template_is_built_in_and_renders(firebox, solarized_light)
         path = presets.builtin_path(p.keys["template"])
         for t in (firebox, solarized_light):
             assert "{{" not in template.render(path.read_text(), template.context(t))
-    assert presets.builtin_names() == ["colors.css", "ghostty", "theme.json", "zed.json"]
+    assert presets.builtin_names() == ["alfred.json", "colors.css", "ghostty", "theme.json", "zed.json"]
     with pytest.raises(KeyError):
         presets.builtin_path("builtin:nope")
 
@@ -35,12 +38,25 @@ def test_example_config_hooks_all_parse(tmp_path):
     p = tmp_path / "hooks.toml"
     p.write_text("\n".join(lines) + "\n")
     hooks = {h.name: h for h in sync.load_hooks(p)}
-    assert list(hooks) == ["Ghostty", "Zed", "CSS variables", "Theme JSON", "Alacritty", "my widget"]
+    assert list(hooks) == ["Ghostty", "Zed", "Alfred", "CSS variables", "Theme JSON", "Alacritty", "my widget"]
+    assert hooks["Alfred"].run == presets.ALFRED_RELOAD and hooks["Alfred"].timeout == 10
     assert (hooks["Theme JSON"].notify, hooks["Theme JSON"].fade) == (presets.NOTIFY_NAME, 800)
     assert (hooks["Ghostty"].terminal, hooks["Ghostty"].fade, hooks["Ghostty"].run) == ("ghostty", 400, None)
     assert hooks["Zed"].fade == 1200 and hooks["Zed"].template == presets.builtin_path("zed.json")
     assert str(hooks["CSS variables"].output).endswith("somewhere/else/colors.css")
     assert hooks["Alacritty"].template == tmp_path / "templates" / "alacritty.toml"
+
+
+def test_alfred_template(firebox, solarized_light):
+    """Valid Alfred theme JSON, named like the preset's `set theme`, colours as #RRGGBBAA."""
+    for t in (firebox, solarized_light):
+        out = template.render(presets.builtin_path("alfred.json").read_text(), template.context(t))
+        theme = json.loads(out)["alfredtheme"]
+        assert theme["name"] == "mood-engine" and 'set theme "mood-engine"' in presets.ALFRED_RELOAD
+        colours = re.findall(r'"#([0-9A-Fa-f]*)"', out)
+        assert len(colours) == 15 and all(len(c) == 8 for c in colours)
+        assert theme["window"]["color"] == "#" + t.roles["bg"].lstrip("#") + "FF"
+    assert presets.ALFRED_THEME.endswith("/themes/theme.custom.mood-engine/theme.json")
 
 
 def test_preset_fills_in_and_keys_override(dirs, mac):

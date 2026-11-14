@@ -1,0 +1,64 @@
+{
+  "alfredtheme" : {
+    "result" : {
+      "textSpacing" : 9,
+      "subtext" : {
+        "size" : 14,
+        "colorSelected" : "#{{role-on-accent-hex}}BF",
+        "font" : "System",
+        "color" : "#{{role-fg-muted-hex}}FF"
+      },
+      "shortcut" : {
+        "size" : 14,
+        "colorSelected" : "#{{role-on-accent-hex}}FF",
+        "font" : "System",
+        "color" : "#{{role-fg-subtle-hex}}FF"
+      },
+      "backgroundSelected" : "#{{role-accent-hex}}FF",
+      "text" : {
+        "size" : 16,
+        "colorSelected" : "#{{role-on-accent-hex}}FF",
+        "font" : "System",
+        "color" : "#{{role-fg-hex}}FF"
+      },
+      "iconPaddingHorizontal" : 13,
+      "roundness" : 18,
+      "paddingVertical" : 8,
+      "iconSize" : 36
+    },
+    "search" : {
+      "backgroundSelected" : "#{{role-selection-hex}}FF",
+      "paddingHorizontal" : 14,
+      "spacing" : 6,
+      "text" : {
+        "size" : 34,
+        "colorSelected" : "#{{role-fg-hex}}FF",
+        "font" : "System",
+        "color" : "#{{role-fg-hex}}FF"
+      },
+      "background" : "#00000000",
+      "roundness" : 23,
+      "paddingVertical" : 4
+    },
+    "window" : {
+      "color" : "#{{role-bg-hex}}FF",
+      "paddingHorizontal" : 14,
+      "width" : 654,
+      "borderPadding" : 0,
+      "borderColor" : "#{{role-border-hex}}FF",
+      "blur" : 0,
+      "roundness" : 28,
+      "paddingVertical" : 14
+    },
+    "credit" : "mood-engine",
+    "separator" : {
+      "color" : "#{{role-border-hex}}FF",
+      "thickness" : 0
+    },
+    "scrollbar" : {
+      "color" : "#{{role-fg-subtle-hex}}80",
+      "thickness" : 6
+    },
+    "name" : "mood-engine"
+  }
+}

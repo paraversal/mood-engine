@@ -20,6 +20,18 @@ BUILTIN_PREFIX = "builtin:"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 EXAMPLE_HOOKS = "hooks.example.toml"  # in TEMPLATES_DIR, written by `hooks --init`
 NOTIFY_NAME = "local.mood-engine.theme"  # the json preset's Darwin notification
+# Each folder in Alfred's themes/ is a theme: the folder name is its id, theme.json's
+# "name" what Alfred shows and `set theme` selects. With Alfred's preference syncing on, the preferences live in the sync folder instead
+# (`current` in ~/Library/Application Support/Alfred/prefs.json): override `output`.
+ALFRED_THEME = ("~/Library/Application Support/Alfred/Alfred.alfredpreferences/themes/"
+                "theme.custom.mood-engine/theme.json")
+# Alfred notices an edited theme file only after up to a minute. Selecting another theme
+# and then this one makes it re-read the file at once ("Alfred Classic" is bundled, so it
+# always exists). `set theme` sets the theme for the current macOS appearance.
+ALFRED_RELOAD = ("osascript -e 'if application id \"com.runningwithcrayons.Alfred\" is running then' "
+                 "-e 'tell application id \"com.runningwithcrayons.Alfred\"' "
+                 "-e 'set theme \"Alfred Classic\"' -e 'set theme \"mood-engine\"' "
+                 "-e 'end tell' -e 'end if'")
 
 
 @dataclass(frozen=True)
@@ -46,6 +58,14 @@ PRESETS: dict[str, Preset] = {
         keys={"template": "builtin:zed.json", "output": "~/.config/zed/themes/mood-engine.json",
               "fade": 800},
         app_config='~/.config/zed/settings.json:  "theme": "mood-engine"',
+    ),
+    "alfred": Preset(
+        name="Alfred",
+        description="Alfred's theme file; Alfred switches to it at once",
+        keys={"template": "builtin:alfred.json", "output": ALFRED_THEME,
+              "run": ALFRED_RELOAD, "timeout": 10},
+        app_config='Alfred Preferences → Appearance: choose "mood-engine" for both the '
+                   'light and the dark theme',
     ),
     "css": Preset(
         name="CSS variables",
