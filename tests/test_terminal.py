@@ -86,7 +86,7 @@ def test_app_ttys_walks_through_root_login(firebox):
     assert terminal.app_ttys("kitty", procs) == []
 
 
-def test_fade_pins_reloads_glides_then_unpins(firebox, solarized_light, pty):
+def test_fade_pins_glides_reloads_then_unpins(firebox, solarized_light, pty):
     path, read = pty
     events = []
     res = terminal.fade(firebox, solarized_light, ms=100, fps=50, ttys=[path], pids=[4242],
@@ -94,7 +94,9 @@ def test_fade_pins_reloads_glides_then_unpins(firebox, solarized_light, pty):
     data = read()
     assert res.faded and res.reloaded == [4242] and res.errors == []
     assert events[0][:3] == ("kill", 4242, signal.SIGUSR2)
-    assert events[0][3] > 0  # the old colours were pinned before the reload
+    # The reload must come after the glide, so a terminal colour query made on the
+    # reload's light/dark report already sees the new colours.
+    assert events[0][3] > len(terminal.osc_set(terminal.colours(firebox)))
     seqs = sequences(data)
     old, new = terminal.colours(firebox), terminal.colours(solarized_light)
     spec = lambda hx: f"rgb:{hx[1:3]}/{hx[3:5]}/{hx[5:7]}"  # noqa: E731

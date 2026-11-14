@@ -5,10 +5,16 @@ with OSC colour sequences written to the terminals' ttys, the same way a program
 the terminal could change its colours:
 
   1. pin the old theme's colours (OSC 4 palette 0-15, OSC 10/11/12 fg/bg/cursor),
-  2. ask the app to reload its config (Ghostty: SIGUSR2), which now names the new theme;
+  2. step the pinned colours to the new theme's, eased, interpolated in OKLab,
+  3. ask the app to reload its config (Ghostty: SIGUSR2), which now names the new theme;
      the pinned colours stay on screen, so the reload itself shows nothing,
-  3. step the pinned colours to the new theme's, eased, interpolated in OKLab,
   4. drop the pins (OSC 104/110/111/112), which leaves the reloaded config's colours.
+
+Reloading *after* the glide matters for apps that react to the terminal's light/dark
+report (Ghostty's mode 2031). The report is sent on the reload; those apps then re-query
+the terminal background. If the reload came first, that query would still see the pinned
+old colours and the app would cache the wrong appearance until something else made it
+re-query. With the reload last, the query sees the new colours.
 
 The in-between colours come from `colours()`; where the app's theme file (rendered from
 the built-in templates/ghostty, or the user's own template) differs, step 4 snaps to
@@ -216,9 +222,17 @@ def fade(src: Theme | None, dst: Theme, *, app: str = "ghostty", ms: int = 400, 
     try:
         if animate:
             broadcast(osc_set(a), must=True)            # 1. pin the old colours
+        if animate:                                      # 2. glide
+            frames = steps(a, b, max(1, round(ms / 1000 * fps)))
+            start, dt = time.monotonic(), ms / 1000 / len(frames)
+            for i, f in enumerate(frames, 1):
+                broadcast(osc_set(f), must=i == len(frames))
+                sleep(max(0.0, start + i * dt - time.monotonic()))
+        elif not reload:
+            broadcast(osc_set(b), must=True)
         reloaded: list[int] = []
         t_reload = time.monotonic()
-        if reload:                                       # 2. reload under the pins
+        if reload:                                       # 3. reload after the glide
             for pid in pids or []:
                 try:
                     kill(pid, RELOAD_SIGNALS[app.lower()])
@@ -227,14 +241,6 @@ def fade(src: Theme | None, dst: Theme, *, app: str = "ghostty", ms: int = 400, 
                     pass
                 except PermissionError as e:
                     errors.append(f"pid {pid}: {e.strerror}")
-        if animate:                                      # 3. glide
-            frames = steps(a, b, max(1, round(ms / 1000 * fps)))
-            start, dt = time.monotonic(), ms / 1000 / len(frames)
-            for i, f in enumerate(frames, 1):
-                broadcast(osc_set(f), must=i == len(frames))
-                sleep(max(0.0, start + i * dt - time.monotonic()))
-        elif not reload:
-            broadcast(osc_set(b), must=True)
         if reload and fds:                               # 4. unpin
             sleep(max(0.0, t_reload + MIN_RELOAD_WAIT - time.monotonic()))
             broadcast(OSC_RESET, must=True)
