@@ -7,3 +7,6 @@ dist/
 .env
 out/
 .DS_Store
+
+# Parked experiments, kept out of version control
+parked/
